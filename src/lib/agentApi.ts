@@ -10,12 +10,24 @@ export function agentApiConfigured(): boolean {
   return Boolean(process.env.QUORUM_AGENT_API_URL);
 }
 
+/**
+ * QUORUM_AGENT_API_KEY is the documented name, but the agent-side var this
+ * has to match is called DASHBOARD_API_KEY (agent/src/config/env.ts) — two
+ * different names for one shared secret across two separate deploys is an
+ * easy mismatch to hit setting this up by hand. Accept either name here
+ * rather than silently sending an empty bearer token if only the
+ * agent-side name got copied over.
+ */
+function resolveAgentApiKey(): string {
+  return process.env.QUORUM_AGENT_API_KEY ?? process.env.DASHBOARD_API_KEY ?? "";
+}
+
 export async function fetchFromAgent<T>(path: string): Promise<T> {
   const base = process.env.QUORUM_AGENT_API_URL;
   if (!base) throw new Error("QUORUM_AGENT_API_URL is not set");
 
   const res = await fetch(`${base.replace(/\/+$/, "")}${path}`, {
-    headers: { authorization: `Bearer ${process.env.QUORUM_AGENT_API_KEY ?? ""}` },
+    headers: { authorization: `Bearer ${resolveAgentApiKey()}` },
     cache: "no-store",
   });
   if (!res.ok) {
