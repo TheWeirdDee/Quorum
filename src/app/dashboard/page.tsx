@@ -6,6 +6,7 @@ import { DecisionCard } from "../../components/DecisionCard";
 import { EmptyState } from "../../components/EmptyState";
 import { RepoPanel } from "../../components/RepoPanel";
 import { StatTile } from "../../components/StatTile";
+import { DEMO_INITIAL_DECISIONS, DEMO_REPOS, DEMO_REVEALS } from "../../lib/demoData";
 import type { DecisionListItem, RepoListItem } from "../../lib/types";
 
 const POLL_MS = 4000;
@@ -14,9 +15,26 @@ export default function DashboardPage() {
   const [decisions, setDecisions] = useState<DecisionListItem[] | null>(null);
   const [repos, setRepos] = useState<RepoListItem[] | null>(null);
   const [sourceError, setSourceError] = useState<string | null>(null);
+  const [demoMode, setDemoMode] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
+
+    // ?demo=true — the recorded-demo surface: seeded data replayed on a
+    // timer (the $0 archive story first, then the real mainnet run, then
+    // the DO_NOT_SHIP climax), never touching the live API. Read off
+    // window.location rather than useSearchParams so the page keeps
+    // prerendering statically without a Suspense boundary.
+    const demo = new URLSearchParams(window.location.search).get("demo");
+    if (demo === "true" || demo === "1") {
+      setDemoMode(true);
+      setRepos(DEMO_REPOS);
+      setDecisions(DEMO_INITIAL_DECISIONS);
+      const timers = DEMO_REVEALS.map(({ afterMs, decision }) =>
+        setTimeout(() => setDecisions((prev) => [decision, ...(prev ?? [])]), afterMs),
+      );
+      return () => timers.forEach(clearTimeout);
+    }
 
     async function load() {
       try {
@@ -59,6 +77,26 @@ export default function DashboardPage() {
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-4 py-8 sm:px-6">
       <Header />
+
+      {demoMode && (
+        <div
+          className="mt-6 flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-sm"
+          style={{
+            borderColor: "var(--status-warning)",
+            backgroundColor: "color-mix(in srgb, var(--status-warning) 10%, transparent)",
+            color: "var(--text-secondary)",
+          }}
+        >
+          <span>
+            <strong style={{ color: "var(--foreground)" }}>Demo mode</strong> — seeded data replaying the demo
+            scenario. The node-ipc card is a real mainnet run with real receipts; SIMULATED entries are fixtures.
+          </span>
+          {/* Plain anchor (full reload), not <Link>: the demo/live switch happens in a mount-once effect, so a client-side nav to the same route wouldn't reset it. */}
+          <a href="/dashboard" className="text-xs underline decoration-dotted underline-offset-2">
+            exit
+          </a>
+        </div>
+      )}
 
       {sourceError && (
         <div
