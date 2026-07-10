@@ -12,6 +12,7 @@ const POLL_MS = 4000;
 export default function DashboardPage() {
   const [decisions, setDecisions] = useState<DecisionListItem[] | null>(null);
   const [repos, setRepos] = useState<RepoListItem[] | null>(null);
+  const [sourceError, setSourceError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -19,14 +20,26 @@ export default function DashboardPage() {
     async function load() {
       try {
         const [decisionsRes, reposRes] = await Promise.all([fetch("/api/decisions?limit=50"), fetch("/api/repos")]);
-        const decisionsJson = (await decisionsRes.json()) as { decisions: DecisionListItem[] };
-        const reposJson = (await reposRes.json()) as { repos: RepoListItem[] };
-        if (!cancelled) {
-          setDecisions(decisionsJson.decisions);
-          setRepos(reposJson.repos);
-        }
+        // Both routes always return valid JSON now, even on failure — a
+        // fetch() that resolves at all (2xx or not) should be parsed, not
+        // treated as a network error, or a real "the data source is
+        // unreachable" condition would silently look identical to success.
+        const decisionsJson = (await decisionsRes.json()) as { decisions: DecisionListItem[]; error?: string };
+        const reposJson = (await reposRes.json()) as { repos: RepoListItem[]; error?: string };
+        if (cancelled) return;
+
+        const err = decisionsJson.error ?? reposJson.error ?? null;
+        setSourceError(err);
+        setDecisions(decisionsJson.decisions);
+        setRepos(reposJson.repos);
       } catch {
-        // Transient fetch failure (e.g. dev server mid-reload) — the next poll tick retries; keep showing the last known state rather than clearing it.
+        // A genuine network-level failure (e.g. dev server mid-reload) — the
+        // next poll tick retries; only surface an error once we've never
+        // successfully loaded anything, so a real outage is visible but a
+        // one-off blip after a successful load doesn't flash an error.
+        if (!cancelled && decisions === null && repos === null) {
+          setSourceError("Could not reach the dashboard's API routes.");
+        }
       }
     }
 
@@ -36,6 +49,7 @@ export default function DashboardPage() {
       cancelled = true;
       clearInterval(interval);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally runs once; the closure reads decisions/repos only to decide whether an error is worth surfacing, not to resubscribe on every data change
   }, []);
 
   const totalSpend = (decisions ?? []).reduce((sum, d) => sum + d.total_spend_usdc, 0);
@@ -44,6 +58,17 @@ export default function DashboardPage() {
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-4 py-8 sm:px-6">
       <Header />
+
+      {sourceError && (
+        <div
+          className="mt-6 rounded-lg border p-3 text-sm"
+          style={{ borderColor: "var(--status-critical)", color: "var(--status-critical)", backgroundColor: "color-mix(in srgb, var(--status-critical) 8%, transparent)" }}
+        >
+          <strong>Can&apos;t reach the data source.</strong> {sourceError} — if this dashboard is deployed separately
+          from the worker, confirm <code>QUORUM_AGENT_API_URL</code> / <code>QUORUM_AGENT_API_KEY</code> are set (see
+          DEPLOY.md §3).
+        </div>
+      )}
 
       <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatTile label="Registered repos" value={repos ? String(repos.length) : "–"} />
