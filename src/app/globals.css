@@ -1,19 +1,19 @@
 @import "tailwindcss";
 
 /*
- * Dashboard palette (dataviz skill references/palette.md). Status colors are
- * fixed — never themed between light/dark, only their surface contrast
- * differs (already accounted for by the skill's own validation). Everything
- * else swaps at the dark breakpoint below.
+ * Single committed light theme — warm cream/"carton" surfaces, no dark mode
+ * (deliberate product decision, not an omission). Status colors follow the
+ * dataviz skill's fixed status palette, validated on a light surface; brand
+ * accents come from the logo (navy #14162c chassis, emerald #34d399 mark).
  */
 :root {
-  --background: #f9f9f7; /* page plane */
-  --foreground: #0b0b0b; /* primary ink */
-  --surface: #fcfcfb; /* card surface */
-  --text-secondary: #52514e;
-  --text-muted: #898781;
-  --border-hairline: rgba(11, 11, 11, 0.1);
-  --gridline: #e1e0d9;
+  --background: #f6f2e9; /* cream page plane */
+  --foreground: #171410; /* warm near-black ink */
+  --surface: #fffdf8; /* card surface */
+  --text-secondary: #57534a;
+  --text-muted: #8a857a;
+  --border-hairline: rgba(23, 20, 16, 0.1);
+  --gridline: #e7e1d4;
 
   --status-good: #0ca30c;
   --status-warning: #fab219;
@@ -22,6 +22,11 @@
 
   --accent-blue: #2a78d6;
   --accent-violet: #4a3aa7;
+
+  /* Brand (from public/logo.svg) */
+  --navy: #14162c;
+  --green: #34d399; /* graphic accent + button fills only — too light for body text on cream */
+  --green-ink: #0b7a55; /* text-safe green for labels/eyebrows */
 }
 
 @theme inline {
@@ -29,21 +34,7 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0d0d0d;
-    --foreground: #ffffff;
-    --surface: #1a1a19;
-    --text-secondary: #c3c2b7;
-    --text-muted: #898781;
-    --border-hairline: rgba(255, 255, 255, 0.1);
-    --gridline: #2c2c2a;
-
-    --accent-blue: #3987e5;
-    --accent-violet: #9085e9;
-  }
+  --font-display: var(--font-bricolage);
 }
 
 body {
