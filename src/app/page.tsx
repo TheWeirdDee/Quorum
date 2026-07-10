@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Drift, Reveal, SmoothScroll } from "../components/motion";
 
 const GITHUB_URL = "https://github.com/TheWeirdDee/Quorum";
 const STORE_URL = "https://agent.croo.network/agents/f6e61f10-a81c-4916-9791-4eab77ac2418";
@@ -73,6 +74,7 @@ const DECISION_JSON = `{
 export default function LandingPage() {
   return (
     <div className="flex-1 overflow-x-clip">
+      <SmoothScroll />
       <Nav />
       <Hero />
       <StatBand />
@@ -121,15 +123,18 @@ function Nav() {
   );
 }
 
-/** Small floating artifact card for the hero corners — real product output, not abstract decoration. */
-function FloatCard({ className, children }: { className: string; children: React.ReactNode }) {
+/** Small floating artifact card for the hero corners — real product output, not abstract decoration. Bobs slowly (Drift) with a per-card phase offset so they don't move in lockstep. */
+function FloatCard({ className, drift = 0, children }: { className: string; drift?: number; children: React.ReactNode }) {
   return (
-    <div
-      aria-hidden
-      className={`pointer-events-none absolute hidden rounded-2xl border px-4 py-3 shadow-lg lg:block ${className}`}
-      style={{ borderColor: "var(--border-hairline)", backgroundColor: "var(--surface)" }}
-    >
-      {children}
+    <div aria-hidden className={`pointer-events-none absolute hidden lg:block ${className}`}>
+      <Drift delay={drift}>
+        <div
+          className="rounded-2xl border px-4 py-3 shadow-lg"
+          style={{ borderColor: "var(--border-hairline)", backgroundColor: "var(--surface)" }}
+        >
+          {children}
+        </div>
+      </Drift>
     </div>
   );
 }
@@ -137,69 +142,77 @@ function FloatCard({ className, children }: { className: string; children: React
 function Hero() {
   return (
     <section className="relative mx-auto w-full max-w-6xl px-4 pb-10 pt-16 text-center sm:px-6 sm:pt-24">
-      <FloatCard className="left-2 top-10 -rotate-6 xl:left-8">
+      <FloatCard drift={0} className="left-2 top-10 -rotate-6 xl:left-8">
         <span className="flex items-center gap-2 text-sm font-semibold" style={{ color: "var(--status-good)" }}>
           <span aria-hidden>✓</span> SHIP
         </span>
         <span className="mt-0.5 block text-xs tabular-nums" style={{ color: "var(--text-muted)" }}>confidence 95%</span>
       </FloatCard>
-      <FloatCard className="right-2 top-14 rotate-6 xl:right-8">
+      <FloatCard drift={1.4} className="right-2 top-14 rotate-6 xl:right-8">
         <span className="flex items-center gap-2 text-sm font-semibold" style={{ color: "var(--status-critical)" }}>
           <span aria-hidden>✕</span> DO NOT SHIP
         </span>
         <span className="mt-0.5 block text-xs tabular-nums" style={{ color: "var(--text-muted)" }}>confidence 94%</span>
       </FloatCard>
-      <FloatCard className="bottom-16 left-6 rotate-3 xl:left-16">
+      <FloatCard drift={2.8} className="bottom-16 left-6 rotate-3 xl:left-16">
         <span className="font-mono text-xs" style={{ color: "var(--accent-blue)" }}>tx 0x5968…b2b ↗</span>
         <span className="mt-0.5 block text-xs" style={{ color: "var(--text-muted)" }}>settled on Base</span>
       </FloatCard>
-      <FloatCard className="bottom-10 right-6 -rotate-3 xl:right-16">
+      <FloatCard drift={4.2} className="bottom-10 right-6 -rotate-3 xl:right-16">
         <span className="text-sm font-semibold" style={{ color: "var(--green-ink)" }}>Tiebreaker bought</span>
         <span className="mt-0.5 block text-xs tabular-nums" style={{ color: "var(--text-muted)" }}>$0.03 · disagreement resolved</span>
       </FloatCard>
 
-      <span
-        className="inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em]"
-        style={{ borderColor: "var(--border-hairline)", backgroundColor: "var(--surface)", color: "var(--text-secondary)" }}
-      >
-        <span aria-hidden style={{ color: "var(--green-ink)" }}>›</span>
-        Autonomous trust broker
-        <span aria-hidden style={{ color: "var(--green-ink)" }}>‹</span>
-      </span>
-
-      <h1 className="font-display mx-auto mt-6 max-w-3xl text-5xl font-bold leading-[1.02] tracking-tight sm:text-7xl">
-        <span style={{ color: "var(--foreground)" }}>Ship or don&apos;t ship.</span>
-        <br />
-        <span style={{ color: "var(--green-ink)" }}>Decided, with receipts.</span>
-      </h1>
-
-      <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed sm:text-lg" style={{ color: "var(--text-secondary)" }}>
-        Quorum watches your dependencies for malicious releases, CVEs and maintainer takeovers — then hires
-        independent specialist agents to verify what&apos;s real, and buys a tiebreaker only when they disagree.
-        A decision and on-chain proof. Not another report.
-      </p>
-
-      <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-        <Link
-          href="/dashboard"
-          className="rounded-xl px-6 py-3 text-sm font-bold transition-opacity hover:opacity-85"
-          style={{ backgroundColor: "var(--green)", color: "var(--navy)" }}
+      <Reveal>
+        <span
+          className="inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em]"
+          style={{ borderColor: "var(--border-hairline)", backgroundColor: "var(--surface)", color: "var(--text-secondary)" }}
         >
-          Open the live dashboard
-        </Link>
-        <a
-          href={STORE_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="rounded-xl px-6 py-3 text-sm font-bold transition-opacity hover:opacity-85"
-          style={{ backgroundColor: "var(--navy)", color: "#fffdf8" }}
-        >
-          Hire it on the Agent Store
-        </a>
-      </div>
-      <p className="mt-4 text-xs" style={{ color: "var(--text-muted)" }}>
-        $1.00 per registration · pay-per-event after · settled in USDC on Base
-      </p>
+          <span aria-hidden style={{ color: "var(--green-ink)" }}>›</span>
+          Autonomous trust broker
+          <span aria-hidden style={{ color: "var(--green-ink)" }}>‹</span>
+        </span>
+      </Reveal>
+
+      <Reveal delay={0.08}>
+        <h1 className="font-display mx-auto mt-6 max-w-3xl text-5xl font-bold leading-[1.02] tracking-tight sm:text-7xl">
+          <span style={{ color: "var(--foreground)" }}>Ship or don&apos;t ship.</span>
+          <br />
+          <span style={{ color: "var(--green-ink)" }}>Decided, with receipts.</span>
+        </h1>
+      </Reveal>
+
+      <Reveal delay={0.16}>
+        <p className="mx-auto mt-6 max-w-2xl text-base leading-relaxed sm:text-lg" style={{ color: "var(--text-secondary)" }}>
+          Quorum watches your dependencies for malicious releases, CVEs and maintainer takeovers — then hires
+          independent specialist agents to verify what&apos;s real, and buys a tiebreaker only when they disagree.
+          A decision and on-chain proof. Not another report.
+        </p>
+      </Reveal>
+
+      <Reveal delay={0.24}>
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+          <Link
+            href="/dashboard"
+            className="rounded-xl px-6 py-3 text-sm font-bold transition-opacity hover:opacity-85"
+            style={{ backgroundColor: "var(--green)", color: "var(--navy)" }}
+          >
+            Open the live dashboard
+          </Link>
+          <a
+            href={STORE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-xl px-6 py-3 text-sm font-bold transition-opacity hover:opacity-85"
+            style={{ backgroundColor: "var(--navy)", color: "#fffdf8" }}
+          >
+            Hire it on the Agent Store
+          </a>
+        </div>
+        <p className="mt-4 text-xs" style={{ color: "var(--text-muted)" }}>
+          $1.00 per registration · pay-per-event after · settled in USDC on Base
+        </p>
+      </Reveal>
     </section>
   );
 }
@@ -207,21 +220,23 @@ function Hero() {
 function StatBand() {
   return (
     <section className="mx-auto w-full max-w-5xl px-4 sm:px-6">
-      <div
-        className="grid grid-cols-2 divide-y rounded-2xl border sm:grid-cols-4 sm:divide-x sm:divide-y-0"
-        style={{ borderColor: "var(--border-hairline)", backgroundColor: "var(--surface)" }}
-      >
-        {STATS.map((stat) => (
-          <div key={stat.label} className="px-5 py-5 text-center" style={{ borderColor: "var(--gridline)" }}>
-            <div className="font-display text-3xl font-bold tabular-nums" style={{ color: "var(--foreground)" }}>
-              {stat.value}
+      <Reveal delay={0.3}>
+        <div
+          className="grid grid-cols-2 divide-y rounded-2xl border sm:grid-cols-4 sm:divide-x sm:divide-y-0"
+          style={{ borderColor: "var(--border-hairline)", backgroundColor: "var(--surface)" }}
+        >
+          {STATS.map((stat) => (
+            <div key={stat.label} className="px-5 py-5 text-center" style={{ borderColor: "var(--gridline)" }}>
+              <div className="font-display text-3xl font-bold tabular-nums" style={{ color: "var(--foreground)" }}>
+                {stat.value}
+              </div>
+              <div className="mt-1 text-xs leading-snug" style={{ color: "var(--text-muted)" }}>
+                {stat.label}
+              </div>
             </div>
-            <div className="mt-1 text-xs leading-snug" style={{ color: "var(--text-muted)" }}>
-              {stat.label}
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      </Reveal>
     </section>
   );
 }
@@ -247,24 +262,27 @@ function SectionHeading({ eyebrow, title, lede }: { eyebrow: string; title: stri
 function Pillars() {
   return (
     <section className="mt-24">
-      <SectionHeading eyebrow="What it does" title="Three jobs. One verdict." />
+      <Reveal>
+        <SectionHeading eyebrow="What it does" title="Three jobs. One verdict." />
+      </Reveal>
       <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-3">
         {PILLARS.map((pillar, i) => (
-          <div
-            key={pillar.title}
-            className="rounded-2xl border p-6"
-            style={{ borderColor: "var(--border-hairline)", backgroundColor: "var(--surface)" }}
-          >
-            <span className="font-mono text-xs font-semibold" style={{ color: "var(--green-ink)" }}>
-              *{String(i + 1).padStart(2, "0")}
-            </span>
-            <h3 className="font-display mt-2 text-xl font-bold" style={{ color: "var(--foreground)" }}>
-              {pillar.title}
-            </h3>
-            <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-              {pillar.body}
-            </p>
-          </div>
+          <Reveal key={pillar.title} delay={i * 0.1}>
+            <div
+              className="h-full rounded-2xl border p-6"
+              style={{ borderColor: "var(--border-hairline)", backgroundColor: "var(--surface)" }}
+            >
+              <span className="font-mono text-xs font-semibold" style={{ color: "var(--green-ink)" }}>
+                *{String(i + 1).padStart(2, "0")}
+              </span>
+              <h3 className="font-display mt-2 text-xl font-bold" style={{ color: "var(--foreground)" }}>
+                {pillar.title}
+              </h3>
+              <p className="mt-2 text-sm leading-relaxed" style={{ color: "var(--text-secondary)" }}>
+                {pillar.body}
+              </p>
+            </div>
+          </Reveal>
         ))}
       </div>
     </section>
@@ -287,28 +305,35 @@ function Moment() {
   ];
   return (
     <section className="mt-24">
-      <SectionHeading
-        eyebrow="The moment that matters"
-        title="Two experts disagreed. Quorum reached for its wallet."
-        lede="This isn't a mockup — it's a real investigation on Base mainnet, receipts included. And when the tiebreaker's own infrastructure failed mid-order, Quorum told the truth instead of inventing a number."
-      />
-      <div
-        className="mt-8 overflow-x-auto rounded-2xl border p-5 sm:p-6"
-        style={{ borderColor: "var(--border-hairline)", backgroundColor: "var(--navy)" }}
-      >
-        <div className="min-w-[540px] space-y-3 font-mono text-[13px] leading-relaxed">
-          {rows.map((row, i) => (
-            <div key={i} className="flex gap-4">
-              <span className="shrink-0 tabular-nums" style={{ color: "rgba(255,253,248,0.4)" }}>
-                {row.time}
-              </span>
-              <span className={row.bold ? "font-bold" : ""} style={{ color: row.color }}>
-                {row.text}
-              </span>
-            </div>
-          ))}
+      <Reveal>
+        <SectionHeading
+          eyebrow="The moment that matters"
+          title="Two experts disagreed. Quorum reached for its wallet."
+          lede="This isn't a mockup — it's a real investigation on Base mainnet, receipts included. And when the tiebreaker's own infrastructure failed mid-order, Quorum told the truth instead of inventing a number."
+        />
+      </Reveal>
+      <Reveal delay={0.1}>
+        <div
+          className="mt-8 overflow-x-auto rounded-2xl border p-5 sm:p-6"
+          style={{ borderColor: "var(--border-hairline)", backgroundColor: "var(--navy)" }}
+        >
+          <div className="min-w-[540px] space-y-3 font-mono text-[13px] leading-relaxed">
+            {rows.map((row, i) => (
+              // Rows replay like a log tailing in: each fades up on its own beat.
+              <Reveal key={i} delay={0.2 + i * 0.12}>
+                <div className="flex gap-4">
+                  <span className="shrink-0 tabular-nums" style={{ color: "rgba(255,253,248,0.4)" }}>
+                    {row.time}
+                  </span>
+                  <span className={row.bold ? "font-bold" : ""} style={{ color: row.color }}>
+                    {row.text}
+                  </span>
+                </div>
+              </Reveal>
+            ))}
+          </div>
         </div>
-      </div>
+      </Reveal>
     </section>
   );
 }
@@ -316,26 +341,31 @@ function Moment() {
 function HowItWorks() {
   return (
     <section id="how" className="mt-24 scroll-mt-24">
-      <SectionHeading eyebrow="How it works" title="From advisory to answer in six moves." />
+      <Reveal>
+        <SectionHeading eyebrow="How it works" title="From advisory to answer in six moves." />
+      </Reveal>
       <ol className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {STEPS.map((step, i) => (
-          <li
-            key={step.title}
-            className="rounded-2xl border p-5"
-            style={{ borderColor: "var(--border-hairline)", backgroundColor: "var(--surface)" }}
-          >
-            <span
-              className="inline-flex h-7 w-7 items-center justify-center rounded-full font-mono text-xs font-bold"
-              style={{ backgroundColor: "var(--green)", color: "var(--navy)" }}
-            >
-              {i + 1}
-            </span>
-            <h3 className="mt-3 text-sm font-bold" style={{ color: "var(--foreground)" }}>
-              {step.title}
-            </h3>
-            <p className="mt-1.5 text-sm leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-              {step.body}
-            </p>
+          <li key={step.title} className="h-full">
+            <Reveal delay={(i % 3) * 0.08} className="h-full">
+              <div
+                className="h-full rounded-2xl border p-5"
+                style={{ borderColor: "var(--border-hairline)", backgroundColor: "var(--surface)" }}
+              >
+                <span
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full font-mono text-xs font-bold"
+                  style={{ backgroundColor: "var(--green)", color: "var(--navy)" }}
+                >
+                  {i + 1}
+                </span>
+                <h3 className="mt-3 text-sm font-bold" style={{ color: "var(--foreground)" }}>
+                  {step.title}
+                </h3>
+                <p className="mt-1.5 text-sm leading-relaxed" style={{ color: "var(--text-secondary)" }}>
+                  {step.body}
+                </p>
+              </div>
+            </Reveal>
           </li>
         ))}
       </ol>
@@ -343,9 +373,9 @@ function HowItWorks() {
   );
 }
 
-function CodeCard({ label, code }: { label: string; code: string }) {
+function CodeCard({ label, code, delay = 0 }: { label: string; code: string; delay?: number }) {
   return (
-    <div className="min-w-0 flex-1">
+    <Reveal delay={delay} className="min-w-0 flex-1">
       <p className="text-xs font-semibold uppercase tracking-[0.15em]" style={{ color: "var(--text-muted)" }}>
         {label}
       </p>
@@ -355,26 +385,29 @@ function CodeCard({ label, code }: { label: string; code: string }) {
       >
         {code}
       </pre>
-    </div>
+    </Reveal>
   );
 }
 
 function UseIt() {
   return (
     <section id="use" className="mt-24 scroll-mt-24">
-      <SectionHeading
-        eyebrow="Use it"
-        title="One registration. Decisions forever."
-        lede="Quorum is a callable CAP agent — order “Supply Chain Trust Monitor” on the CROO Agent Store from your own agent or the store UI. Send a repo and a risk policy; every future trust event comes back as a structured, signed-and-settled decision."
-      />
+      <Reveal>
+        <SectionHeading
+          eyebrow="Use it"
+          title="One registration. Decisions forever."
+          lede="Quorum is a callable CAP agent — order “Supply Chain Trust Monitor” on the CROO Agent Store from your own agent or the store UI. Send a repo and a risk policy; every future trust event comes back as a structured, signed-and-settled decision."
+        />
+      </Reveal>
       <div className="mt-8 flex flex-col gap-4 lg:flex-row">
         <CodeCard label="You send" code={REQUEST_JSON} />
         <div className="hidden items-center font-display text-2xl font-bold lg:flex" style={{ color: "var(--green-ink)" }} aria-hidden>
           →
         </div>
-        <CodeCard label="You get back — quorum.decision.v1" code={DECISION_JSON} />
+        <CodeCard label="You get back — quorum.decision.v1" code={DECISION_JSON} delay={0.12} />
       </div>
 
+      <Reveal>
       <div className="mt-8 overflow-x-auto rounded-2xl border" style={{ borderColor: "var(--border-hairline)" }}>
         <table className="w-full min-w-[560px] border-collapse text-sm">
           <thead>
@@ -400,6 +433,7 @@ function UseIt() {
       <p className="mt-3 text-sm" style={{ color: "var(--text-muted)" }}>
         The policy chooses how much certainty to buy — you never micromanage a call.
       </p>
+      </Reveal>
     </section>
   );
 }
@@ -407,11 +441,14 @@ function UseIt() {
 function Comparison() {
   return (
     <section className="mt-24">
-      <SectionHeading
-        eyebrow="Not another scanner"
-        title="Scanners hand you a report. Quorum hands you an answer."
-        lede="Repo Doctor already sells a health check; VERIS already sells due diligence. Quorum hires both, reconciles engineering health against supply-chain trust, and puts money behind resolving the conflict."
-      />
+      <Reveal>
+        <SectionHeading
+          eyebrow="Not another scanner"
+          title="Scanners hand you a report. Quorum hands you an answer."
+          lede="Repo Doctor already sells a health check; VERIS already sells due diligence. Quorum hires both, reconciles engineering health against supply-chain trust, and puts money behind resolving the conflict."
+        />
+      </Reveal>
+      <Reveal delay={0.1}>
       <div className="mt-8 overflow-x-auto rounded-2xl border" style={{ borderColor: "var(--border-hairline)" }}>
         <table className="w-full min-w-[560px] border-collapse text-sm">
           <thead>
@@ -434,6 +471,7 @@ function Comparison() {
           </tbody>
         </table>
       </div>
+      </Reveal>
     </section>
   );
 }
@@ -441,6 +479,7 @@ function Comparison() {
 function WhyAgentEconomy() {
   return (
     <section className="mt-24">
+      <Reveal>
       <div
         className="rounded-2xl border p-6 sm:p-10"
         style={{ borderColor: "var(--border-hairline)", backgroundColor: "var(--surface)" }}
@@ -459,6 +498,7 @@ function WhyAgentEconomy() {
           each other.
         </p>
       </div>
+      </Reveal>
     </section>
   );
 }
@@ -466,6 +506,7 @@ function WhyAgentEconomy() {
 function CtaBand() {
   return (
     <section className="mx-auto mt-24 w-full max-w-5xl px-4 sm:px-6">
+      <Reveal>
       <div className="rounded-3xl px-6 py-12 text-center sm:px-12 sm:py-16" style={{ backgroundColor: "var(--navy)" }}>
         <h2 className="font-display mx-auto max-w-2xl text-3xl font-bold tracking-tight sm:text-5xl" style={{ color: "#fffdf8" }}>
           Your dependencies won&apos;t wait.
@@ -493,6 +534,7 @@ function CtaBand() {
           </Link>
         </div>
       </div>
+      </Reveal>
     </section>
   );
 }
