@@ -1,0 +1,16 @@
+{
+  "_note": "PRIMARY DEMO TRIGGER. Feed this into the Event Detector's normalized output to fire the full pipeline live. Passes the Risk Gate (critical + production dep) -> hires Repo Doctor + VERIS -> they disagree -> escalation -> DO_NOT_SHIP.",
+  "dependency": "evil-dep@2.4.1",
+  "type": "malicious_release",
+  "severity_hint": "critical",
+  "source": "osv",
+  "ref": "GHSA-xxxx-demo-0001",
+  "observed_at": "2026-07-05T10:14:02Z",
+  "context": {
+    "previous_version": "2.4.0",
+    "repo": "https://github.com/acme/evil-dep",
+    "npm_homepage": "https://www.npmjs.com/package/evil-dep",
+    "is_production_dependency": true,
+    "detail": "Version 2.4.1 published 40 minutes ago; advisory reports a postinstall script exfiltrating environment variables. Prior versions clean."
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "_note": "Mocked ESCALATION deliverable. Only bought when health/trust disagree AND confidence < policy target AND within budget. The escalation agent is an ENV SLOT (a live Research/Report agent, or ChainGuard for web3 deps) — this fixture stands in for whichever is confirmed live. It investigates the specific disputed signal (the postinstall) and breaks the tie toward the trust lens.",
+  "for_dependency": "evil-dep@2.4.1",
+  "disputed_signal": "Is the added postinstall script actually malicious / reachable?",
+  "raw": {
+    "finding": "confirmed_malicious",
+    "detail": "postinstall runs `curl` piping process.env to an external host; matches known exfiltration pattern.",
+    "confidence": 0.95
+  },
+  "normalized": {
+    "lens": "escalation",
+    "agent": "<ESCALATION_AGENT>",
+    "verdict": "confirms_trust_risk",
+    "resolves_toward": "high_risk"
+  },
+  "cap": { "order_id": "MOCK-ESC-0001", "tx": "0xMOCK_ESCALATION_TX", "cost_usdc": 0.03 }
+}

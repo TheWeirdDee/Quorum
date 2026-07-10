@@ -1,0 +1,26 @@
+{
+  "_note": "Mocked VERIS trust/due-diligence deliverable for evil-dep. VERIS answers ONLY trust -> HIGH_RISK. This is the lens that disagrees with Repo Doctor's 'healthy' and drives escalation. VERIS notes weak inputs = limited findings, so always pass repo URL + npm homepage + the event ref.",
+  "for_dependency": "evil-dep@2.4.1",
+  "raw": {
+    "subject": "https://github.com/acme/evil-dep",
+    "trust_score": 28,
+    "tier": "high_risk",
+    "signals": [
+      "publisher ownership changed 6 days ago",
+      "new npm maintainer added immediately before 2.4.1",
+      "postinstall script added in 2.4.1 (not present in 2.4.0)",
+      "trust score dropped 41 points in the last week"
+    ],
+    "evidence": [
+      { "claim": "ownership change", "source": "npm maintainer history" },
+      { "claim": "postinstall added", "source": "package diff 2.4.0->2.4.1" }
+    ]
+  },
+  "normalized": {
+    "lens": "trust",
+    "agent": "VERIS",
+    "verdict": "high_risk",
+    "signals": ["ownership changed 6d ago", "new maintainer pre-release", "postinstall added in 2.4.1", "trust score -41 this week"]
+  },
+  "cap": { "order_id": "MOCK-VERIS-0001", "tx": "0xMOCK_VERIS_TX", "cost_usdc": 0.10 }
+}

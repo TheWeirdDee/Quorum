@@ -1,0 +1,14 @@
+{
+  "_note": "SECONDARY SCENARIO (agreement path). A real CVE on an already-unhealthy, low-trust dep. Both lenses agree -> DO_NOT_SHIP at high confidence with NO escalation (tests the 'agree, don't overspend' branch).",
+  "dependency": "abandoned-lib@0.9.2",
+  "type": "new_cve",
+  "severity_hint": "high",
+  "source": "osv",
+  "ref": "CVE-2026-DEMO-7788",
+  "observed_at": "2026-07-05T09:02:00Z",
+  "context": {
+    "repo": "https://github.com/ghost/abandoned-lib",
+    "is_production_dependency": true,
+    "detail": "Prototype-pollution CVE, no patch available. Last commit 19 months ago."
+  }
+}

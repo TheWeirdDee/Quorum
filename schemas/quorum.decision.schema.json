@@ -1,0 +1,118 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "quorum.decision.v1",
+  "title": "Quorum Decision",
+  "description": "The quorum.decision.v1 deliverable: a ship/don't-ship decision for one TrustEvent, with confidence, per-lens verdicts, escalation record, and on-chain receipts. Delivered on the initial register order (baseline scan) and pushed on every subsequent triggered event.",
+  "type": "object",
+  "required": [
+    "schema",
+    "dependency",
+    "event",
+    "gate",
+    "decision",
+    "confidence",
+    "lenses",
+    "escalation",
+    "disagreement",
+    "total_spend_usdc",
+    "receipts",
+    "decided_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "quorum.decision.v1" },
+    "dependency": {
+      "type": "string",
+      "description": "package@version",
+      "pattern": "^.+@.+$"
+    },
+    "event": {
+      "type": "object",
+      "required": ["type", "detail", "source", "ref", "severity_hint"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "malicious_release",
+            "new_cve",
+            "maintainer_change",
+            "repo_archived",
+            "license_change",
+            "abandonment",
+            "suspicious_cadence",
+            "deprecation",
+            "baseline_scan"
+          ]
+        },
+        "detail": { "type": "string" },
+        "source": { "enum": ["osv", "github", "npm", "system"] },
+        "ref": { "type": "string" },
+        "severity_hint": { "enum": ["critical", "high", "medium", "low", "info"] }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "description": "The Risk Gate's spend/don't-spend decision, recorded even when nothing is spent.",
+      "required": ["investigated", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "investigated": { "type": "boolean" },
+        "reason": { "type": "string" }
+      }
+    },
+    "decision": {
+      "enum": ["SHIP", "REVIEW", "DO_NOT_SHIP", "ARCHIVED_NO_ACTION"]
+    },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "lenses": {
+      "type": "object",
+      "description": "Empty when the gate archived the event before any hire.",
+      "additionalProperties": false,
+      "properties": {
+        "health": { "$ref": "#/definitions/lensResult" },
+        "trust": { "$ref": "#/definitions/lensResult" }
+      }
+    },
+    "escalation": {
+      "type": "object",
+      "required": ["triggered"],
+      "additionalProperties": false,
+      "properties": {
+        "triggered": { "type": "boolean" },
+        "agent": { "type": "string" },
+        "order_id": { "type": "string" },
+        "tx": { "type": "string" },
+        "cost_usdc": { "type": "number", "minimum": 0 },
+        "reason": { "type": "string" }
+      }
+    },
+    "disagreement": {
+      "type": "string",
+      "description": "Plain-English explanation of health/trust disagreement; empty string when lenses agreed or nothing was purchased."
+    },
+    "total_spend_usdc": { "type": "number", "minimum": 0 },
+    "receipts": {
+      "type": "array",
+      "description": "On-chain settlement tx hashes for every opinion purchased for this event, in purchase order. Never a fabricated hash.",
+      "items": { "type": "string" }
+    },
+    "decided_at": { "type": "string", "format": "date-time" }
+  },
+  "definitions": {
+    "lensResult": {
+      "type": "object",
+      "description": "order_id/tx/cost_usdc are populated once the CAP hire settles (milestone 3+); agent+verdict are known as soon as the deliverable is parsed, so only those are required.",
+      "required": ["agent", "verdict"],
+      "additionalProperties": false,
+      "properties": {
+        "agent": { "type": "string" },
+        "verdict": {
+          "enum": ["healthy", "mixed", "unhealthy", "trusted", "caution", "high_risk"]
+        },
+        "order_id": { "type": "string" },
+        "tx": { "type": "string" },
+        "cost_usdc": { "type": "number", "minimum": 0 }
+      }
+    }
+  }
+}

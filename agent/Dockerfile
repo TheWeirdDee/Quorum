@@ -1,0 +1,34 @@
+# Quorum agent (event detector, risk gate, orchestrator, CAP provider/requester worker).
+# Build from the agent/ directory: `docker build -t quorum-agent -f Dockerfile .` (context = agent/).
+# Runs `npm run worker` (scripts/worker.ts) — the always-on process that serves
+# quorum.register orders and hires Repo Doctor/VERIS/Themis. See NFR-5 (PRD.md).
+
+# ---- deps: install once, reused by both the build and runtime stages ----
+FROM node:20-slim AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# ---- build: compile TS -> JS (native-module-free at this stage; better-sqlite3's
+# native binding is only needed at RUNTIME, not for tsc) ----
+FROM deps AS build
+COPY tsconfig.json ./
+COPY src ./src
+COPY scripts ./scripts
+RUN npx tsc -p tsconfig.json
+
+# ---- runtime: production deps only + compiled output, no TS toolchain ----
+FROM node:20-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+COPY --from=build /app/dist ./dist
+
+# quorum.db lives here — mount a persistent volume at this path in production
+# (Render disk / Railway volume / Fly volume) or the worker's state resets on
+# every deploy/restart.
+VOLUME ["/app/data"]
+ENV DATABASE_URL=file:/app/data/quorum.db
+
+CMD ["node", "dist/scripts/worker.js"]

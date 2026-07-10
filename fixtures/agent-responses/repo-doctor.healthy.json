@@ -1,0 +1,21 @@
+{
+  "_note": "Mocked Repo Doctor 'Repo Health Check' deliverable for evil-dep. Repo Doctor answers ONLY technical health -> here it looks HEALTHY (this is what makes the disagreement with VERIS interesting). 'raw' mimics the agent's own output shape; 'normalized' is what our adapter must produce. Confirm the real raw shape against a live call before trusting field names.",
+  "for_dependency": "evil-dep@2.4.1",
+  "raw": {
+    "repo": "https://github.com/acme/evil-dep",
+    "readme_quality": "good",
+    "has_tests": true,
+    "test_coverage_present": true,
+    "outdated_dependencies": 1,
+    "commit_hygiene": "active",
+    "last_commit_days_ago": 3,
+    "health_score": 82
+  },
+  "normalized": {
+    "lens": "health",
+    "agent": "Repo Doctor",
+    "verdict": "healthy",
+    "signals": ["active commits (3d)", "tests present", "good README", "1 outdated dep"]
+  },
+  "cap": { "order_id": "MOCK-RD-0001", "tx": "0xMOCK_REPO_DOCTOR_TX", "cost_usdc": 0.01 }
+}

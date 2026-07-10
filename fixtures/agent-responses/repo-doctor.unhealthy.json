@@ -1,0 +1,21 @@
+{
+  "_note": "Mocked Repo Doctor 'Repo Health Check' deliverable for abandoned-lib. Repo Doctor answers ONLY technical health -> here it looks UNHEALTHY (no tests, stale commits). Combined with VERIS 'caution' this yields the AGREEMENT path -> DO_NOT_SHIP with NO escalation. 'raw' mimics the agent's own output shape; 'normalized' is what our adapter must produce. Confirm the real raw shape against a live call before trusting field names.",
+  "for_dependency": "abandoned-lib@0.9.2",
+  "raw": {
+    "repo": "https://github.com/ghost/abandoned-lib",
+    "readme_quality": "poor",
+    "has_tests": false,
+    "test_coverage_present": false,
+    "outdated_dependencies": 14,
+    "commit_hygiene": "stale",
+    "last_commit_days_ago": 580,
+    "health_score": 21
+  },
+  "normalized": {
+    "lens": "health",
+    "agent": "Repo Doctor",
+    "verdict": "unhealthy",
+    "signals": ["no tests", "14 outdated deps", "stale commits (580d)", "poor README"]
+  },
+  "cap": { "order_id": "MOCK-RD-0002", "tx": "0xMOCK_REPO_DOCTOR_TX2", "cost_usdc": 0.01 }
+}

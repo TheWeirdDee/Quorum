@@ -1,0 +1,17 @@
+{
+  "_note": "Mocked VERIS deliverable for the abandoned-lib agreement scenario -> CAUTION (unmaintained, but no active malice). Combined with Repo Doctor 'unhealthy' this yields DO_NOT_SHIP with NO escalation.",
+  "for_dependency": "abandoned-lib@0.9.2",
+  "raw": {
+    "subject": "https://github.com/ghost/abandoned-lib",
+    "trust_score": 44,
+    "tier": "caution",
+    "signals": ["maintainer inactive 19 months", "no security policy", "single maintainer", "no recent releases"]
+  },
+  "normalized": {
+    "lens": "trust",
+    "agent": "VERIS",
+    "verdict": "caution",
+    "signals": ["maintainer inactive 19mo", "single maintainer", "no security policy"]
+  },
+  "cap": { "order_id": "MOCK-VERIS-0002", "tx": "0xMOCK_VERIS_TX2", "cost_usdc": 0.10 }
+}

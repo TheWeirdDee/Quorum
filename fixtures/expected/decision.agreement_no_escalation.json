@@ -1,0 +1,24 @@
+{
+  "_note": "EXPECTED OUTPUT for the new_cve/abandoned-lib scenario under BALANCED policy (target 0.80). Both lenses point bad (unhealthy + caution) -> agreement -> DO_NOT_SHIP 0.85, already above target -> NO escalation. Tests the 'agree, don't overspend' branch. Total spend 0.11.",
+  "schema": "quorum.decision.v1",
+  "dependency": "abandoned-lib@0.9.2",
+  "event": {
+    "type": "new_cve",
+    "detail": "prototype pollution, no patch; last commit 19mo ago",
+    "source": "osv",
+    "ref": "CVE-2026-DEMO-7788",
+    "severity_hint": "high"
+  },
+  "gate": { "investigated": true, "reason": "high-severity CVE on a production dependency" },
+  "decision": "DO_NOT_SHIP",
+  "confidence": 0.85,
+  "lenses": {
+    "health": { "agent": "Repo Doctor", "verdict": "unhealthy", "order_id": "MOCK-RD-0002", "tx": "0xMOCK_REPO_DOCTOR_TX2", "cost_usdc": 0.01 },
+    "trust":  { "agent": "VERIS", "verdict": "caution", "order_id": "MOCK-VERIS-0002", "tx": "0xMOCK_VERIS_TX2", "cost_usdc": 0.10 }
+  },
+  "escalation": { "triggered": false, "reason": "lenses agree (unhealthy + caution); confidence 0.85 >= policy target 0.80 — no additional opinion purchased" },
+  "disagreement": "",
+  "total_spend_usdc": 0.11,
+  "receipts": ["0xMOCK_REPO_DOCTOR_TX2", "0xMOCK_VERIS_TX2"],
+  "decided_at": "2026-07-05T09:02:41Z"
+}

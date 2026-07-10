@@ -1,0 +1,31 @@
+{
+  "_note": "EXPECTED OUTPUT for the malicious_release scenario under ENTERPRISE policy (target 0.90). Unit-test the full pipeline against this. Flow: gate=investigate -> RepoDoctor healthy + VERIS high_risk -> disagreement, confidence 0.60 < 0.90 -> escalate ($0.03) -> resolves to high_risk -> DO_NOT_SHIP 0.94. Total spend 0.14.",
+  "schema": "quorum.decision.v1",
+  "dependency": "evil-dep@2.4.1",
+  "event": {
+    "type": "malicious_release",
+    "detail": "postinstall exfiltrating env vars added in 2.4.1",
+    "source": "osv",
+    "ref": "GHSA-xxxx-demo-0001",
+    "severity_hint": "critical"
+  },
+  "gate": { "investigated": true, "reason": "critical severity on a production dependency" },
+  "decision": "DO_NOT_SHIP",
+  "confidence": 0.94,
+  "lenses": {
+    "health": { "agent": "Repo Doctor", "verdict": "healthy", "order_id": "MOCK-RD-0001", "tx": "0xMOCK_REPO_DOCTOR_TX", "cost_usdc": 0.01 },
+    "trust":  { "agent": "VERIS", "verdict": "high_risk", "order_id": "MOCK-VERIS-0001", "tx": "0xMOCK_VERIS_TX", "cost_usdc": 0.10 }
+  },
+  "escalation": {
+    "triggered": true,
+    "agent": "<ESCALATION_AGENT>",
+    "order_id": "MOCK-ESC-0001",
+    "tx": "0xMOCK_ESCALATION_TX",
+    "cost_usdc": 0.03,
+    "reason": "health/trust disagreement; confidence 0.60 < policy target 0.90; budget remaining $0.14"
+  },
+  "disagreement": "Repo Doctor sees an active, well-tested repo (healthy); VERIS flags an ownership change and a postinstall added in 2.4.1 (high risk). Escalation confirmed the postinstall is malicious.",
+  "total_spend_usdc": 0.14,
+  "receipts": ["0xMOCK_REPO_DOCTOR_TX", "0xMOCK_VERIS_TX", "0xMOCK_ESCALATION_TX"],
+  "decided_at": "2026-07-05T10:15:07Z"
+}

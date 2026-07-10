@@ -1,36 +1,35 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Supply Chain Quorum
 
-## Getting Started
+An **autonomous trust broker** for your software supply chain, built on the CROO Agent Protocol (CAP).
 
-First, run the development server:
+Register a repo once. Quorum watches its dependencies for trust events (malicious releases, new CVEs, maintainer changes, abandonment, license flips). When something meaningful happens, it **decides whether the event is worth investigating**, then hires independent specialist agents to answer two different questions —
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- **Repo Doctor** → *Is this dependency technically healthy?*
+- **VERIS** → *Is this project/publisher trustworthy?*
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+— reconciles engineering-health against supply-chain-trust, and when they disagree, **autonomously spends a little more USDC to buy certainty** (governed by a risk policy) before returning the one answer a developer actually needs:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+> **Should I keep shipping this dependency in production?**
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+A decision, with confidence and on-chain receipts. Not a report. It only spends money when additional expert analysis is economically justified — which is a thing that can't exist on a normal API marketplace.
 
-## Learn More
+## This handoff package
+| File | Purpose |
+|---|---|
+| `SPEC.md` | The full build spec — vision, architecture, event loop, risk gate, orchestration, escalation, demo script. |
+| `AGENT_PROMPT.md` | Paste-into-Claude-Code build prompt: ground rules, incremental build order, definition of done. |
+| `schemas/quorum.request.schema.json` | Provider input (register a repo). |
+| `schemas/quorum.decision.schema.json` | The `quorum.decision.v1` deliverable. |
+| `.env.example` | All configuration — CROO keys, hired-agent service IDs, event sources, notifications. |
 
-To learn more about Next.js, take a look at the following resources:
+## Before you build — three liveness checks
+The whole design depends on real, callable counterparties. Confirm in the Agent Store, the morning of the demo:
+1. **Repo Doctor** — LIVE, recent activity.
+2. **VERIS** — LIVE, recent activity.
+3. **Escalation agent** — pick a live Research/Report agent (or ChainGuard for web3 deps) and set `ESCALATION_AGENT_SERVICE_ID`. If none is live, the graceful-degrade path (honest sub-target confidence) still works — adaptive spend is the innovation, not the agent count.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Stack
+TypeScript · Node 20 · `@croo-network/sdk` · Base mainnet (USDC) · SQLite→Postgres · Slack webhook · deploy provider/worker to Render/Railway/Fly, dashboard to Vercel.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Scope
+Pitch: "we monitor your software supply chain." MVP: **npm + GitHub** run the full economic pipeline; Python/Docker/Actions are discovered-and-displayed. Depth in the decision engine beats breadth in ecosystem coverage — that's where the rubric points.

@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "quorum.register.request",
+  "title": "Quorum Register Request",
+  "description": "Payload a buyer/agent sends in negotiation.requirements to register a repo for monitoring.",
+  "type": "object",
+  "required": ["repo", "risk_policy"],
+  "additionalProperties": false,
+  "properties": {
+    "repo": {
+      "type": "string",
+      "format": "uri",
+      "description": "GitHub repository URL to monitor.",
+      "pattern": "^https://github\\.com/[^/]+/[^/]+/?$"
+    },
+    "ecosystems": {
+      "type": "array",
+      "description": "Dependency ecosystems to monitor. MVP runs the full pipeline on 'npm' only; others are discover-and-display.",
+      "items": { "enum": ["npm", "pypi", "docker", "actions"] },
+      "default": ["npm"]
+    },
+    "risk_policy": {
+      "enum": ["startup", "balanced", "enterprise"],
+      "description": "Controls confidence target, escalation aggressiveness, and per-event budget cap."
+    },
+    "budget_cap_usdc": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Hard ceiling on total spend per event. Defaults from policy if omitted (startup 0.05, balanced 0.15, enterprise 0.25)."
+    },
+    "notify": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["slack", "none"] },
+        "webhook": { "type": "string", "format": "uri" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

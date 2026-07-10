@@ -1,0 +1,36 @@
+{
+  "name": "@quorum/agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Quorum backend agent: event detector, risk gate, orchestration, CAP provider/requester worker.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "hire:repo-doctor": "tsx scripts/hire-repo-doctor.ts",
+    "hire:veris": "tsx scripts/hire-veris.ts",
+    "hire:escalation": "tsx scripts/hire-escalation.ts",
+    "list-orders": "tsx scripts/list-orders.ts",
+    "probe:quote": "tsx scripts/probe-quote.ts",
+    "demo": "tsx scripts/demo.ts",
+    "investigate": "tsx scripts/investigate.ts",
+    "worker": "tsx scripts/worker.ts"
+  },
+  "dependencies": {
+    "@croo-network/sdk": "^0.2.1",
+    "better-sqlite3": "^11.10.0",
+    "dotenv": "^16.4.5",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^20.17.9",
+    "tsx": "^4.22.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

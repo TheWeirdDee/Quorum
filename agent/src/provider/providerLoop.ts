@@ -1,0 +1,111 @@
+import { DeliverableType, EventType, type AgentClient, type Event, type EventStream } from "@croo-network/sdk";
+import { logger } from "../config/logger.js";
+import type { QuorumDecision } from "../decision/schema.js";
+import { parseQuorumRequest, type QuorumRequest } from "./requestSchema.js";
+import type { RequirementsCache } from "./requirementsCache.js";
+
+export interface ProviderLoopParams {
+  client: AgentClient;
+  stream: EventStream;
+  requirementsCache: RequirementsCache;
+  /** Runs the baseline scan for an accepted+paid registration. Injectable so tests can exercise the negotiation/order lifecycle without the full investigate() pipeline; production callers pass `runBaselineScan` bound to db/client/correlator. */
+  runBaseline: (request: QuorumRequest) => Promise<{ decision: QuorumDecision }>;
+}
+
+async function safeRejectOrder(client: AgentClient, orderId: string, reason: string): Promise<void> {
+  try {
+    await client.rejectOrder(orderId, reason);
+  } catch (err) {
+    logger.error(`providerLoop: rejectOrder(${orderId}) also failed:`, err);
+  }
+}
+
+async function handleNegotiationCreated(client: AgentClient, cache: RequirementsCache, event: Event): Promise<void> {
+  const negotiationId = event.negotiation_id;
+  if (!negotiationId) {
+    logger.error("providerLoop: order_negotiation_created event carried no negotiation_id");
+    return;
+  }
+
+  let requirements: string;
+  try {
+    requirements = (await client.getNegotiation(negotiationId)).requirements;
+  } catch (err) {
+    logger.error(`providerLoop: getNegotiation(${negotiationId}) failed:`, err);
+    return;
+  }
+
+  const parsed = parseQuorumRequest(requirements);
+  if (!parsed.ok) {
+    logger.info(`providerLoop: rejecting negotiation ${negotiationId} — ${parsed.reason}`);
+    try {
+      await client.rejectNegotiation(negotiationId, parsed.reason);
+    } catch (err) {
+      logger.error(`providerLoop: rejectNegotiation(${negotiationId}) failed:`, err);
+    }
+    return;
+  }
+
+  try {
+    const accepted = await client.acceptNegotiation(negotiationId);
+    cache.remember(accepted.order.orderId, negotiationId, parsed.request);
+    logger.info(`providerLoop: accepted negotiation ${negotiationId} -> order ${accepted.order.orderId} (repo=${parsed.request.repo})`);
+  } catch (err) {
+    logger.error(`providerLoop: acceptNegotiation(${negotiationId}) failed — buyer's funds were never locked, nothing to release:`, err);
+  }
+}
+
+async function handleOrderPaid(
+  client: AgentClient,
+  cache: RequirementsCache,
+  runBaseline: ProviderLoopParams["runBaseline"],
+  event: Event,
+): Promise<void> {
+  const orderId = event.order_id;
+  if (!orderId) {
+    logger.error("providerLoop: order_paid event carried no order_id");
+    return;
+  }
+
+  const request = await cache.recall(orderId);
+  if (!request) {
+    logger.error(`providerLoop: order ${orderId} paid but no cached quorum.register requirements were found — rejecting to release escrow`);
+    await safeRejectOrder(client, orderId, "internal error: registration requirements could not be recovered for this order");
+    return;
+  }
+
+  try {
+    const { decision } = await runBaseline(request);
+    await client.deliverOrder(orderId, { deliverableType: DeliverableType.Schema, deliverableSchema: JSON.stringify(decision) });
+    logger.info(`providerLoop: delivered order ${orderId} (repo=${request.repo}, decision=${decision.decision})`);
+  } catch (err) {
+    logger.error(`providerLoop: baseline scan / deliverOrder failed for order ${orderId}:`, err);
+    await safeRejectOrder(client, orderId, "internal error running the baseline scan");
+  }
+}
+
+/**
+ * FR-1..FR-4, SPEC §2/§3: Quorum's provider-side WS loop for `quorum.register`.
+ * Subscribes on the SAME connection the requester side (M3/M4 hires) uses —
+ * SPEC's single order-ID map living in RequirementsCache/OrderEventCorrelator
+ * is what keeps served vs bought orders from being confused, not two sockets.
+ *
+ * order_negotiation_created -> validate (Zod) -> acceptNegotiation (caching
+ * requirements under the returned orderId, FR-3) or rejectNegotiation
+ * BEFORE any funds lock (FR-2). order_paid -> recall requirements -> run the
+ * baseline scan -> deliverOrder (FR-4). Every handler is wrapped so a
+ * failure is logged, never thrown into the SDK's event dispatcher, and
+ * never leaves an order stuck: an unrecoverable failure past acceptance
+ * calls rejectOrder to release escrow (SPEC §3).
+ */
+export function startProviderLoop(params: ProviderLoopParams): void {
+  const { client, stream, requirementsCache, runBaseline } = params;
+
+  stream.on(EventType.NegotiationCreated, (event) => {
+    void handleNegotiationCreated(client, requirementsCache, event);
+  });
+
+  stream.on(EventType.OrderPaid, (event) => {
+    void handleOrderPaid(client, requirementsCache, runBaseline, event);
+  });
+}

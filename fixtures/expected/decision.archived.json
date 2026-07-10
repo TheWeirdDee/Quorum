@@ -1,0 +1,21 @@
+{
+  "_note": "EXPECTED OUTPUT for the low_severity_patch event. Gate archives it -> NO agents hired, $0 spent, no receipts. Tests the spend/no-spend gate BEFORE any CAP call.",
+  "schema": "quorum.decision.v1",
+  "dependency": "left-pad@1.3.1",
+  "event": {
+    "type": "deprecation",
+    "detail": "docs-only patch on a devDependency; no advisory",
+    "source": "npm",
+    "ref": "https://www.npmjs.com/package/left-pad",
+    "severity_hint": "low"
+  },
+  "gate": { "investigated": false, "reason": "low severity, non-production, no advisory — not worth purchasing analysis" },
+  "decision": "ARCHIVED_NO_ACTION",
+  "confidence": 1.0,
+  "lenses": {},
+  "escalation": { "triggered": false },
+  "disagreement": "",
+  "total_spend_usdc": 0.0,
+  "receipts": [],
+  "decided_at": "2026-07-05T10:11:25Z"
+}
