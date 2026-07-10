@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { agentApiConfigured, fetchFromAgent } from "../../../lib/agentApi";
 import { safeAll, safeGet } from "../../../lib/db";
 import type { RepoListItem } from "../../../lib/types";
 
@@ -15,6 +16,15 @@ interface RepoRow {
 }
 
 export async function GET() {
+  if (agentApiConfigured()) {
+    try {
+      const data = await fetchFromAgent<{ repos: RepoListItem[] }>("/repos");
+      return NextResponse.json(data);
+    } catch (err) {
+      return NextResponse.json({ repos: [], error: err instanceof Error ? err.message : "agent API unreachable" }, { status: 502 });
+    }
+  }
+
   const rows = safeAll<RepoRow>(
     `SELECT id, github_url, risk_policy, budget_cap_usdc, notify_type, created_at FROM repos ORDER BY id`,
   );

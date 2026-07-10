@@ -11,6 +11,8 @@
  * CROO_SIMULATE still governs whether the OUTBOUND hires inside each
  * baseline scan / poll cycle spend real USDC (see investigate()/hireAgent()).
  */
+import type { Server } from "node:http";
+import { startReadApi } from "../src/api/server.js";
 import { env } from "../src/config/env.js";
 import { logger } from "../src/config/logger.js";
 import { connectCrooEventStream, confirmAuth, createCrooClient } from "../src/croo/client.js";
@@ -55,9 +57,20 @@ async function main(): Promise<void> {
   const { stop: stopPolling } = startPollLoop({ db, client, correlator, simulate: env.CROO_SIMULATE });
   logger.info(`worker: poll loop started (every ${env.POLL_INTERVAL_MINUTES} minute(s))`);
 
+  // Only needed when the dashboard is deployed separately from this worker
+  // (e.g. Vercel) and can't read agent/quorum.db directly — see DEPLOY.md.
+  // Local dev / co-located deploys leave DASHBOARD_API_KEY unset and skip this.
+  let readApi: Server | undefined;
+  if (env.DASHBOARD_API_KEY) {
+    readApi = startReadApi(db);
+  } else {
+    logger.info("worker: DASHBOARD_API_KEY not set — read API disabled (fine for local dev / co-located deploys)");
+  }
+
   const shutdown = () => {
     logger.info("worker: shutting down");
     stopPolling();
+    readApi?.close();
     stream.close();
     db.close();
     process.exit(0);

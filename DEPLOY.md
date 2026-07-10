@@ -40,9 +40,13 @@ tsconfig.json` compiles clean and the compiled output runs under plain
   `REPO_DOCTOR_SERVICE_ID`/`VERIS_SERVICE_ID`/`ESCALATION_AGENT_SERVICE_ID`
   confirmed live and current; `CROO_SIMULATE=false` only once you mean to
   spend real USDC.
-- **Process type**: background worker, not a web service — it opens an
-  outbound CROO WebSocket, it doesn't listen on a port. On Render this is a
-  "Background Worker"; Railway/Fly just don't need a health-check port bound.
+- **Process type**: background worker, not a web service, by default — it
+  opens an outbound CROO WebSocket, it doesn't listen on a port. On Render
+  this is a "Background Worker"; Railway/Fly just don't need a
+  health-check port bound. **Exception**: if `DASHBOARD_API_KEY` is set
+  (§3, Option B), the worker also binds `DASHBOARD_API_PORT` (default
+  8080) and needs a routable public URL — deploy it as a Web Service
+  instead, and open/expose that port.
 
 ```
 docker build -t quorum-agent -f agent/Dockerfile agent
@@ -58,22 +62,33 @@ the dashboard can only be deployed **co-located with the agent's disk** —
 not on Vercel talking to an agent running elsewhere, since Vercel functions
 share no filesystem with a Render/Railway/Fly volume.
 
-Two honest options, not silently picked for you:
+Two options, both built now:
 
-- **A — co-locate for the demo (fastest, zero new code).** Run the
-  dashboard as a second process/service on the SAME host as the agent
-  worker, both pointed at the same mounted volume (e.g. two Render
-  services attached to one persistent disk, or both processes in one
-  container behind a tiny supervisor). Matches everything already built.
-- **B — dashboard on Vercel, per the original README/PRD plan.** Requires
-  a small addition not yet built: a read-only HTTP endpoint on the agent
-  worker exposing `decisions`/`repos` as JSON, with the dashboard's two API
-  routes switched from `better-sqlite3` file reads to `fetch()` against
-  that endpoint (env-gated, so local dev keeps the direct file read). Real
-  but small — say if you want this built next.
-
-Given the timeline, **A is the pragmatic default**; I haven't built B
-because it's genuine new scope, not a Dockerfile detail.
+- **A — co-locate (fastest, zero extra setup).** Run the dashboard as a
+  second process/service on the SAME host as the agent worker, both
+  pointed at the same mounted volume. Leave `DASHBOARD_API_KEY` /
+  `QUORUM_AGENT_API_URL` unset — the dashboard's two API routes fall back
+  to reading `agent/quorum.db` directly.
+- **B — dashboard on Vercel, worker elsewhere.** The worker exposes a
+  minimal read-only HTTP API (`agent/src/api/server.ts`, plain
+  `node:http`, two routes: `GET /decisions`, `GET /repos`) that the
+  dashboard's API routes proxy to instead of touching the filesystem.
+  Setup:
+  1. **Agent-side** (`agent/.env` or the worker host's env): set
+     `DASHBOARD_API_KEY` to a real secret. `DASHBOARD_API_PORT` defaults
+     to 8080. Redeploy as a Web Service (see §2's exception above) so the
+     port is actually reachable.
+  2. **Dashboard-side** (Vercel project env vars — NOT `agent/.env`): set
+     `QUORUM_AGENT_API_URL` to the worker's public URL (`https://your-
+     worker-host:8080`) and `QUORUM_AGENT_API_KEY` to the *same* secret
+     as `DASHBOARD_API_KEY`.
+  3. Verified locally end-to-end: started the read API standalone against
+     the real seeded `quorum.db`, confirmed a bare request 401s, a
+     wrong-key request 401s, and an authorized request returns the exact
+     JSON shape the dashboard already expects (agent/test/api/server.test.ts,
+     7 tests). The dashboard-side proxy itself (fetch → pass-through) is a
+     thin enough layer that this coverage stands in for a full
+     cross-deploy integration test.
 
 ## 4. What's still unverified
 

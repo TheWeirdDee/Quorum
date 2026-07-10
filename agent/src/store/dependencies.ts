@@ -67,3 +67,9 @@ export function getDependencyById(db: Database.Database, id: number): Dependency
 export function listDependenciesForRepo(db: Database.Database, repoId: number): DependencyRecord[] {
   return db.prepare(`SELECT * FROM dependencies WHERE repo_id = ?`).all(repoId) as DependencyRecord[];
 }
+
+/** Cheaper than listDependenciesForRepo(...).length for the dashboard's per-repo count — avoids materializing every row. */
+export function countDependenciesForRepo(db: Database.Database, repoId: number): number {
+  const row = db.prepare(`SELECT COUNT(*) as n FROM dependencies WHERE repo_id = ?`).get(repoId) as { n: number };
+  return row.n;
+}

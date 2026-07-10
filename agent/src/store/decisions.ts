@@ -41,3 +41,13 @@ export function insertDecision(db: Database.Database, input: InsertDecisionInput
   if (!created) throw new Error("Failed to read back decision after insert");
   return created;
 }
+
+/** Most recent decisions first, for the dashboard's event feed (direct local read, or via the read API — see src/api/server.ts). */
+export function listRecentDecisions(db: Database.Database, limit = 50): DecisionRecord[] {
+  return db
+    .prepare(
+      `SELECT id, event_id, payload_json, decision, confidence, total_spend_usdc, decided_at
+       FROM decisions ORDER BY id DESC LIMIT ?`,
+    )
+    .all(limit) as DecisionRecord[];
+}

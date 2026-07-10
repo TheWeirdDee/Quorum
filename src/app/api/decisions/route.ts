@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { agentApiConfigured, fetchFromAgent } from "../../../lib/agentApi";
 import { safeAll } from "../../../lib/db";
 import type { DecisionListItem, QuorumDecision } from "../../../lib/types";
 
@@ -18,6 +19,15 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const requested = Number(searchParams.get("limit") ?? "50");
   const limit = Math.min(Number.isFinite(requested) && requested > 0 ? requested : 50, 200);
+
+  if (agentApiConfigured()) {
+    try {
+      const data = await fetchFromAgent<{ decisions: DecisionListItem[] }>(`/decisions?limit=${limit}`);
+      return NextResponse.json(data);
+    } catch (err) {
+      return NextResponse.json({ decisions: [], error: err instanceof Error ? err.message : "agent API unreachable" }, { status: 502 });
+    }
+  }
 
   const rows = safeAll<DecisionRow>(
     `SELECT id, payload_json, decision, confidence, total_spend_usdc, decided_at FROM decisions ORDER BY id DESC LIMIT ?`,

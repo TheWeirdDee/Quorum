@@ -77,6 +77,16 @@ const envSchema = z.object({
   // ── Notifications ──
   SLACK_WEBHOOK_URL: z.string().default(""),
 
+  // ── Dashboard read API ──
+  // A minimal read-only HTTP surface (src/api/server.ts) so a dashboard
+  // deployed separately from this worker (e.g. Vercel, which shares no
+  // filesystem with wherever this process runs) can read decisions/repos
+  // without a direct SQLite file read. Only needed for that split-host
+  // deployment; local dev reads agent/quorum.db directly and ignores this.
+  DASHBOARD_API_PORT: z.coerce.number().int().positive().default(8080),
+  /** Shared secret with the dashboard's QUORUM_AGENT_API_KEY. Empty = the read API refuses every request rather than serving unauthenticated. */
+  DASHBOARD_API_KEY: z.string().default(""),
+
   // ── State ──
   DATABASE_URL: z.string().default("file:./quorum.db"),
 
@@ -125,6 +135,7 @@ export const SECRET_ENV_KEYS: readonly (keyof Env)[] = [
   "CROO_BUYER_API_KEY",
   "GITHUB_TOKEN",
   "SLACK_WEBHOOK_URL",
+  "DASHBOARD_API_KEY",
 ];
 
 export { loadEnv, envSchema };

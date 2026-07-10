@@ -31,4 +31,9 @@ COPY --from=build /app/dist ./dist
 VOLUME ["/app/data"]
 ENV DATABASE_URL=file:/app/data/quorum.db
 
+# Only bound when DASHBOARD_API_KEY is set (DEPLOY.md §3 option B — a
+# dashboard deployed separately, e.g. Vercel). Harmless to expose otherwise;
+# the process simply never listens on it.
+EXPOSE 8080
+
 CMD ["node", "dist/scripts/worker.js"]
