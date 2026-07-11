@@ -8,24 +8,25 @@ import type { DecisionListItem, RepoListItem } from "./types";
  * as plain unlinked text so a fixture can never impersonate a receipt.
  */
 
+/** Real, existing repos — the panel links straight to GitHub, so fictional slugs would 404. */
 export const DEMO_REPOS: RepoListItem[] = [
   {
     id: 1,
-    github_url: "https://github.com/acme/api-service",
+    github_url: "https://github.com/expressjs/express",
     risk_policy: "enterprise",
     budget_cap_usdc: 0.25,
     notify_type: "slack",
     created_at: "2026-07-10T09:12:00Z",
-    dependencyCount: 42,
+    dependencyCount: 31,
   },
   {
     id: 2,
-    github_url: "https://github.com/acme/marketing-site",
+    github_url: "https://github.com/lodash/lodash",
     risk_policy: "startup",
     budget_cap_usdc: null,
     notify_type: "none",
     created_at: "2026-07-10T09:14:00Z",
-    dependencyCount: 17,
+    dependencyCount: 12,
   },
 ];
 
@@ -37,12 +38,12 @@ const baselineScan: DecisionListItem = {
   decided_at: "2026-07-10T09:12:31Z",
   payload: {
     schema: "quorum.decision.v1",
-    dependency: "acme/api-service@registration",
+    dependency: "expressjs/express@registration",
     event: {
       type: "baseline_scan",
-      detail: "Registered https://github.com/acme/api-service; indexed 42 npm dependencies. No investigatable trust events found.",
+      detail: "Registered https://github.com/expressjs/express; indexed 31 npm dependencies. No investigatable trust events found.",
       source: "system",
-      ref: "https://github.com/acme/api-service",
+      ref: "https://github.com/expressjs/express",
       severity_hint: "info",
     },
     gate: { investigated: false, reason: "no investigatable trust events at registration" },
@@ -178,8 +179,8 @@ const maliciousRelease: DecisionListItem = {
 /** Shown immediately on load (oldest at the bottom, matching the live feed's DESC order). */
 export const DEMO_INITIAL_DECISIONS: DecisionListItem[] = [archivedPatch, baselineScan];
 
-/** Prepended to the feed on a timer, in narrative order — the $0 story is already on screen, then the real run lands, then the climax. */
+/** Prepended to the feed on a timer, in narrative order — the $0 story is already on screen, then the real run lands, then the climax. Paced for narration: reload the page to replay from the top. */
 export const DEMO_REVEALS: { afterMs: number; decision: DecisionListItem }[] = [
-  { afterMs: 6000, decision: realNodeIpc },
-  { afterMs: 14000, decision: maliciousRelease },
+  { afterMs: 12_000, decision: realNodeIpc },
+  { afterMs: 28_000, decision: maliciousRelease },
 ];
