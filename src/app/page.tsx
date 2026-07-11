@@ -109,6 +109,7 @@ function Nav() {
         <div className="hidden items-center gap-6 text-sm font-medium sm:flex" style={{ color: "var(--text-secondary)" }}>
           <a href="#how" className="hover:opacity-70">How it works</a>
           <a href="#use" className="hover:opacity-70">Use it</a>
+          <Link href="/docs" className="hover:opacity-70">Docs</Link>
           <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="hover:opacity-70">GitHub</a>
         </div>
         <div className="flex items-center gap-2">
@@ -567,6 +568,7 @@ function Footer() {
           <p className="text-xs font-semibold uppercase tracking-[0.15em]" style={{ color: "var(--text-muted)" }}>Product</p>
           <ul className="mt-3 space-y-2 text-sm" style={{ color: "var(--text-secondary)" }}>
             <li><Link href="/dashboard" className="hover:opacity-70">Live dashboard</Link></li>
+            <li><Link href="/docs" className="hover:opacity-70">Documentation</Link></li>
             <li><a href={STORE_URL} target="_blank" rel="noopener noreferrer" className="hover:opacity-70">Agent Store listing</a></li>
             <li><a href={`${GITHUB_URL}/blob/main/schemas/quorum.decision.schema.json`} target="_blank" rel="noopener noreferrer" className="hover:opacity-70">Decision schema</a></li>
           </ul>
