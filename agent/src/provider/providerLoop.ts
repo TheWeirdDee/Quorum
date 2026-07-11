@@ -1,4 +1,12 @@
-import { DeliverableType, EventType, type AgentClient, type Event, type EventStream } from "@croo-network/sdk";
+import {
+  DeliverableType,
+  EventType,
+  NegotiationStatus,
+  OrderStatus,
+  type AgentClient,
+  type Event,
+  type EventStream,
+} from "@croo-network/sdk";
 import { logger } from "../config/logger.js";
 import type { QuorumDecision } from "../decision/schema.js";
 import { parseQuorumRequest, type QuorumRequest } from "./requestSchema.js";
@@ -162,9 +170,20 @@ export function startProviderLoop(params: ProviderLoopParams): void {
 export async function sweepProviderBacklog(params: Omit<ProviderLoopParams, "stream">): Promise<void> {
   const { client, requirementsCache, runBaseline } = params;
 
+  // Deliberately NOT passing a server-side `status` filter to either list
+  // call: a live pending negotiation went unfound by
+  // listNegotiations({ status: "pending" }) — the endpoint evidently doesn't
+  // filter by the same status vocabulary the objects carry. Fetch the page
+  // and match locally against the SDK's own enums instead, and log the
+  // statuses actually seen so a future mismatch diagnoses itself from logs.
   try {
-    const pending = await client.listNegotiations({ role: "provider", status: "pending", pageSize: 50 });
-    for (const negotiation of pending) {
+    const negotiations = await client.listNegotiations({ role: "provider", pageSize: 50 });
+    if (negotiations.length > 0) {
+      logger.info(
+        `providerLoop sweep: ${negotiations.length} provider negotiation(s), statuses: ${[...new Set(negotiations.map((n) => n.status))].join(", ")}`,
+      );
+    }
+    for (const negotiation of negotiations.filter((n) => n.status === NegotiationStatus.Pending)) {
       logger.info(`providerLoop sweep: found pending negotiation ${negotiation.negotiationId} with no seen event — processing`);
       await handleNegotiationCreated(client, requirementsCache, {
         type: EventType.NegotiationCreated,
@@ -177,8 +196,13 @@ export async function sweepProviderBacklog(params: Omit<ProviderLoopParams, "str
   }
 
   try {
-    const paid = await client.listOrders({ role: "provider", status: "paid", pageSize: 50 });
-    for (const order of paid) {
+    const orders = await client.listOrders({ role: "provider", pageSize: 50 });
+    if (orders.length > 0) {
+      logger.info(
+        `providerLoop sweep: ${orders.length} provider order(s), statuses: ${[...new Set(orders.map((o) => o.status))].join(", ")}`,
+      );
+    }
+    for (const order of orders.filter((o) => o.status === OrderStatus.Paid)) {
       logger.info(`providerLoop sweep: found paid undelivered order ${order.orderId} with no seen event — processing`);
       await handleOrderPaid(client, requirementsCache, runBaseline, {
         type: EventType.OrderPaid,

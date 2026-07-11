@@ -155,7 +155,12 @@ describe("sweepProviderBacklog", () => {
 
   it("accepts a pending negotiation whose order_negotiation_created event was never seen (worker was down)", async () => {
     const client = {
-      listNegotiations: vi.fn().mockResolvedValue([{ negotiationId: "neg-missed" }]),
+      // No server-side status filter: a real pending negotiation went
+      // unfound when one was passed — the sweep filters locally instead.
+      listNegotiations: vi.fn().mockResolvedValue([
+        { negotiationId: "neg-already-done", status: "accepted" },
+        { negotiationId: "neg-missed", status: "pending" },
+      ]),
       listOrders: vi.fn().mockResolvedValue([]),
       getNegotiation: vi.fn().mockResolvedValue({ requirements: VALID_REQUEST_JSON }),
       acceptNegotiation: vi.fn().mockResolvedValue({ negotiation: {}, order: { orderId: "order-missed" } }),
@@ -165,7 +170,8 @@ describe("sweepProviderBacklog", () => {
 
     await sweepProviderBacklog({ client, requirementsCache: cache, runBaseline: vi.fn() });
 
-    expect(client.listNegotiations).toHaveBeenCalledWith({ role: "provider", status: "pending", pageSize: 50 });
+    expect(client.listNegotiations).toHaveBeenCalledWith({ role: "provider", pageSize: 50 });
+    expect(client.acceptNegotiation).toHaveBeenCalledTimes(1);
     expect(client.acceptNegotiation).toHaveBeenCalledWith("neg-missed");
     const recalled = await cache.recall("order-missed");
     expect(recalled?.repo).toBe("https://github.com/acme/thing");
@@ -174,7 +180,10 @@ describe("sweepProviderBacklog", () => {
   it("delivers a paid order whose order_paid event was never seen", async () => {
     const client = {
       listNegotiations: vi.fn().mockResolvedValue([]),
-      listOrders: vi.fn().mockResolvedValue([{ orderId: "order-paid-missed" }]),
+      listOrders: vi.fn().mockResolvedValue([
+        { orderId: "order-done", status: "completed" },
+        { orderId: "order-paid-missed", status: "paid" },
+      ]),
       deliverOrder: vi.fn().mockResolvedValue(undefined),
       rejectOrder: vi.fn(),
     } as unknown as AgentClient;
@@ -184,8 +193,8 @@ describe("sweepProviderBacklog", () => {
 
     await sweepProviderBacklog({ client, requirementsCache: cache, runBaseline });
 
-    expect(client.listOrders).toHaveBeenCalledWith({ role: "provider", status: "paid", pageSize: 50 });
-    expect(runBaseline).toHaveBeenCalled();
+    expect(client.listOrders).toHaveBeenCalledWith({ role: "provider", pageSize: 50 });
+    expect(runBaseline).toHaveBeenCalledTimes(1);
     expect(client.deliverOrder).toHaveBeenCalledWith("order-paid-missed", expect.objectContaining({ deliverableType: "schema" }));
   });
 
