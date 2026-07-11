@@ -67,12 +67,20 @@ export function startReadApi(
   apiKey: string = env.DASHBOARD_API_KEY,
 ): Server {
   const server = createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://localhost");
+
+    // Unauthenticated on purpose: uptime pingers (which keep a free-tier
+    // host awake) can't send headers worth trusting, and this leaks nothing
+    // — a bare 200. Everything else stays behind the key.
+    if (req.method === "GET" && url.pathname === "/health") {
+      sendJson(res, 200, { ok: true });
+      return;
+    }
+
     if (!isAuthorized(req, apiKey)) {
       sendJson(res, 401, { error: "unauthorized" });
       return;
     }
-
-    const url = new URL(req.url ?? "/", "http://localhost");
 
     if (req.method === "GET" && url.pathname === "/decisions") {
       handleDecisions(db, url, res);

@@ -32,6 +32,12 @@ describe("read API server", () => {
     expect(res.status).toBe(401);
   });
 
+  it("GET /health returns 200 without auth (uptime pinger target), leaking nothing", async () => {
+    const res = await fetch(`${baseUrl}/health`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+  });
+
   it("returns 401 with the wrong key", async () => {
     const res = await fetch(`${baseUrl}/repos`, { headers: { authorization: "Bearer wrong-key" } });
     expect(res.status).toBe(401);
