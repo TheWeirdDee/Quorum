@@ -86,6 +86,38 @@ const archivedPatch: DecisionListItem = {
   },
 };
 
+/** SIMULATED prior scan of node-ipc, a month earlier — exists so the trajectory view has movement to show (SHIP 95% → REVIEW 60%) when the real July run lands. */
+const priorNodeIpcShip: DecisionListItem = {
+  id: 0,
+  decision: "SHIP",
+  confidence: 0.95,
+  total_spend_usdc: 0.11,
+  decided_at: "2026-06-15T09:30:00Z",
+  payload: {
+    schema: "quorum.decision.v1",
+    dependency: "node-ipc@9.2.0",
+    event: {
+      type: "maintainer_change",
+      detail: "Maintainer roster changed on a production dependency — routine audit.",
+      source: "npm",
+      ref: "https://www.npmjs.com/package/node-ipc",
+      severity_hint: "medium",
+    },
+    gate: { investigated: true, reason: "maintainer change on a production dependency" },
+    decision: "SHIP",
+    confidence: 0.95,
+    lenses: {
+      health: { agent: "Repo Doctor", verdict: "healthy", order_id: "SIMULATED-demo0a", tx: "SIMULATED", cost_usdc: 0.01 },
+      trust: { agent: "VERIS", verdict: "trusted", order_id: "SIMULATED-demo0b", tx: "SIMULATED", cost_usdc: 0.1 },
+    },
+    escalation: { triggered: false },
+    disagreement: "",
+    total_spend_usdc: 0.11,
+    receipts: ["SIMULATED", "SIMULATED"],
+    decided_at: "2026-06-15T09:30:00Z",
+  },
+};
+
 /** The REAL mainnet investigation — real verdicts, real costs, real tx hashes (Basescan-linkable). */
 const realNodeIpc: DecisionListItem = {
   id: 3,
@@ -177,7 +209,7 @@ const maliciousRelease: DecisionListItem = {
 };
 
 /** Shown immediately on load (oldest at the bottom, matching the live feed's DESC order). */
-export const DEMO_INITIAL_DECISIONS: DecisionListItem[] = [archivedPatch, baselineScan];
+export const DEMO_INITIAL_DECISIONS: DecisionListItem[] = [archivedPatch, baselineScan, priorNodeIpcShip];
 
 /** Prepended to the feed on a timer, in narrative order — the $0 story is already on screen, then the real run lands, then the climax. Paced for narration: reload the page to replay from the top. */
 export const DEMO_REVEALS: { afterMs: number; decision: DecisionListItem }[] = [

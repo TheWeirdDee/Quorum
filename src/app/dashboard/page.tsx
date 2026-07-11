@@ -6,6 +6,7 @@ import { DecisionCard } from "../../components/DecisionCard";
 import { EmptyState } from "../../components/EmptyState";
 import { RepoPanel } from "../../components/RepoPanel";
 import { StatTile } from "../../components/StatTile";
+import { TrustTrajectory } from "../../components/TrustTrajectory";
 import { DEMO_INITIAL_DECISIONS, DEMO_REPOS, DEMO_REVEALS } from "../../lib/demoData";
 import type { DecisionListItem, RepoListItem } from "../../lib/types";
 
@@ -89,7 +90,7 @@ export default function DashboardPage() {
         >
           <span>
             <strong style={{ color: "var(--foreground)" }}>Demo mode</strong> — seeded data replaying the demo
-            scenario. The node-ipc card is a real mainnet run with real receipts; SIMULATED entries are fixtures.
+            scenario. The node-ipc REVIEW card is a real mainnet run with real receipts; SIMULATED entries are fixtures.
           </span>
           {/* Plain anchor (full reload), not <Link>: the demo/live switch happens in a mount-once effect, so a client-side nav to the same route wouldn't reset it. */}
           <a href="/dashboard" className="text-xs underline decoration-dotted underline-offset-2">
@@ -132,6 +133,8 @@ export default function DashboardPage() {
           )}
         </div>
       </section>
+
+      <TrustTrajectory decisions={decisions ?? []} />
 
       <section className="mt-8 flex-1">
         <h2 className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>
