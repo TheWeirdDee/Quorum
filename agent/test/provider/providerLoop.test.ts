@@ -108,6 +108,10 @@ describe("startProviderLoop", () => {
     expect(typeof wire["escalation"]).toBe("string");
     expect(JSON.parse(wire["event"] as string)).toEqual(FAKE_DECISION.event);
     expect(wire["decision"]).toBe("ARCHIVED_NO_ACTION");
+    // CROO rejects empty required fields as missing (INVALID_DELIVERABLE,
+    // order 893a8395) — a baseline decision's ""/[] must be padded on the wire.
+    expect(wire["disagreement"]).toBeTruthy();
+    expect((wire["receipts"] as string[]).length).toBeGreaterThan(0);
     expect(client.rejectOrder).not.toHaveBeenCalled();
   });
 

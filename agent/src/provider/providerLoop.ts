@@ -28,8 +28,15 @@ export interface ProviderLoopParams {
  * the service's deliverable schema (filled in on the Configure page)
  * documents `event`/`gate`/`lenses`/`escalation` as compact-JSON *strings*,
  * not nested objects — a store-form limitation, same one the request side
- * hit in reverse (see normalizeWireRequest). Deliver what the listing
- * promises; the canonical nested form stays in schemas/ and the dashboard.
+ * hit in reverse (see normalizeWireRequest).
+ *
+ * CONFIRMED live (order 893a8395, 2026-07-11): CROO's deliverable validator
+ * treats an EMPTY value on a required field as missing — `APIError:
+ * INVALID_DELIVERABLE: disagreement: missing_required` — and a baseline
+ * decision legitimately carries disagreement:"" and receipts:[]. Pad those
+ * with honest explanatory text on the wire only; the canonical nested form
+ * (schemas/, the DB, the dashboard) keeps its true empty values, and the
+ * padding text is unmistakably not a fabricated tx hash.
  */
 export function toWireDeliverable(decision: QuorumDecision): Record<string, unknown> {
   return {
@@ -38,6 +45,8 @@ export function toWireDeliverable(decision: QuorumDecision): Record<string, unkn
     gate: JSON.stringify(decision.gate),
     lenses: JSON.stringify(decision.lenses),
     escalation: JSON.stringify(decision.escalation),
+    disagreement: decision.disagreement || "none — no disagreement to report for this decision",
+    receipts: decision.receipts.length > 0 ? decision.receipts : ["none — no opinions were purchased for this decision"],
   };
 }
 

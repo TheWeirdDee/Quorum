@@ -973,3 +973,48 @@ Store listing to obtain a real SDK-Key for the provider side. Themis's real
 deliverable shape is still unconfirmed (item 26's infra problem, unrelated
 to this session's work) — the escalation slot's parser remains a best guess
 past the "hire succeeded" point, same status as before this session.
+
+## 28. First real inbound orders: the Agent Store's wire format bit in BOTH directions (2026-07-11)
+
+Quorum went live on the Agent Store and served its first real buyer orders.
+Four attempts, three distinct integration failures, each fixed with the
+exact failing payload locked in as a regression test:
+
+**(a) Requests: the store form sends scalars, not the schema's types.**
+Attempts 1-2 were rejected by our own FR-2 validation — correctly by its
+own lights, wrongly in effect. The store's order form submits every field
+as a scalar: `notify` arrives as a JSON *string* ('{"type":"none"}'),
+`ecosystems` as a plain string, optionals as "". `parseQuorumRequest` now
+normalizes the knowable form encodings before validating strictly
+(`normalizeWireRequest`).
+
+**(b) Deliveries: nested objects don't match the listing's declared schema.**
+Attempt 3's scan SUCCEEDED (repo + 15 deps persisted, decision produced) and
+`deliverOrder` threw 4s later — the shared catch mislabeled it as a scan
+failure. The listing declares `event`/`gate`/`lenses`/`escalation` as
+compact-JSON strings (a form-builder limitation), so delivery now flattens
+to that wire shape (`toWireDeliverable`); the canonical nested form stays in
+schemas/, the DB, and the dashboard.
+
+**(c) CROO treats EMPTY required fields as missing.** Attempt 4 failed with
+the first precise server-side error of the series: `APIError:
+INVALID_DELIVERABLE (400): disagreement: missing_required`. A baseline
+decision legitimately carries `disagreement: ""` and `receipts: []` — so
+only the QUIET decisions were undeliverable. The wire shape now pads empty
+required fields with honest explanatory text ("none — no opinions were
+purchased for this decision") that can't be mistaken for a fabricated hash.
+
+Also hardened along the way, each from a real failure: a provider backlog
+sweep (boot + every 60s) for negotiations/orders whose WS events fired while
+the worker was down (a free-tier host sleeps; a real negotiation expired
+unseen); the sweep lists WITHOUT a server-side `status` param (a live
+pending negotiation went unfound by `listNegotiations({status:"pending"})` —
+local filtering against the SDK enums instead); per-dependency fetch
+isolation in the baseline scan (one thrown fetch refunded a whole paid
+order); a paid-status wait + one delivery retry before rejecting; and
+distinct reject reasons for scan vs delivery failures so the CAP timeline
+never again points at the wrong stage.
+
+Money note: every failed attempt refunded the buyer's full $1.00 escrow
+automatically — four real demonstrations of CAP's honest-failure path, zero
+buyer losses, before the first successful delivery.
