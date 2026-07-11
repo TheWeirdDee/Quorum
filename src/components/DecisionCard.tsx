@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import { ConfidenceMeter } from "./ConfidenceMeter";
 import { DecisionBadge } from "./DecisionBadge";
 import { LensBadge } from "./LensBadge";
@@ -28,9 +31,20 @@ function LensCard({ role, lens }: { role: "health" | "trust"; lens: LensResult }
 export function DecisionCard({ decision }: { decision: QuorumDecision }) {
   const { event, gate, lenses, escalation, disagreement, total_spend_usdc, receipts } = decision;
   const hasLenses = Boolean(lenses.health || lenses.trust);
+  const [expanded, setExpanded] = useState(false);
 
   return (
-    <article className="rounded-lg border p-4" style={{ borderColor: "var(--border-hairline)", backgroundColor: "var(--surface)" }}>
+    <article
+      className="cursor-pointer rounded-lg border p-4 transition-shadow hover:shadow-sm"
+      style={{ borderColor: "var(--border-hairline)", backgroundColor: "var(--surface)" }}
+      onClick={(e) => {
+        // Links inside the card (Basescan receipts, repo links) must keep
+        // working as links — only plain card clicks toggle the deliverable.
+        if ((e.target as HTMLElement).closest("a")) return;
+        setExpanded((v) => !v);
+      }}
+      aria-expanded={expanded}
+    >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="truncate font-mono text-sm font-medium" style={{ color: "var(--foreground)" }}>
@@ -93,6 +107,24 @@ export function DecisionCard({ decision }: { decision: QuorumDecision }) {
           ${total_spend_usdc.toFixed(2)} · {receipts.length} receipt{receipts.length === 1 ? "" : "s"}
         </span>
       </div>
+
+      <div className="mt-2 text-center text-[11px]" style={{ color: "var(--text-muted)" }}>
+        {expanded ? "▴ hide full deliverable" : "▾ click to view the full deliverable"}
+      </div>
+
+      {expanded && (
+        <div className="mt-2">
+          <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>
+            quorum.decision.v1 — the exact object delivered to the buyer
+          </div>
+          <pre
+            className="mt-1.5 max-h-96 overflow-auto rounded-lg border p-3 font-mono text-[11px] leading-relaxed"
+            style={{ borderColor: "var(--border-hairline)", backgroundColor: "var(--background)", color: "var(--text-secondary)" }}
+          >
+            {JSON.stringify(decision, null, 2)}
+          </pre>
+        </div>
+      )}
     </article>
   );
 }

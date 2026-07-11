@@ -11,12 +11,14 @@ import { DEMO_INITIAL_DECISIONS, DEMO_REPOS, DEMO_REVEALS } from "../../lib/demo
 import type { DecisionListItem, RepoListItem } from "../../lib/types";
 
 const POLL_MS = 4000;
+const FEED_PAGE_SIZE = 10;
 
 export default function DashboardPage() {
   const [decisions, setDecisions] = useState<DecisionListItem[] | null>(null);
   const [repos, setRepos] = useState<RepoListItem[] | null>(null);
   const [sourceError, setSourceError] = useState<string | null>(null);
   const [demoMode, setDemoMode] = useState(false);
+  const [feedPage, setFeedPage] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,6 +76,11 @@ export default function DashboardPage() {
 
   const totalSpend = (decisions ?? []).reduce((sum, d) => sum + d.total_spend_usdc, 0);
   const investigatedCount = (decisions ?? []).filter((d) => d.payload.gate.investigated).length;
+
+  // Feed pagination: stats stay whole-history; only the card list pages.
+  const totalPages = Math.max(1, Math.ceil((decisions?.length ?? 0) / FEED_PAGE_SIZE));
+  const page = Math.min(feedPage, totalPages - 1);
+  const pagedDecisions = (decisions ?? []).slice(page * FEED_PAGE_SIZE, (page + 1) * FEED_PAGE_SIZE);
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-4 py-8 sm:px-6">
@@ -148,9 +155,35 @@ export default function DashboardPage() {
           ) : decisions.length === 0 ? (
             <EmptyState message="No decisions yet. Once a repo is registered and a trust event fires, it appears here live." />
           ) : (
-            decisions.map((d) => <DecisionCard key={d.id} decision={d.payload} />)
+            pagedDecisions.map((d) => <DecisionCard key={d.id} decision={d.payload} />)
           )}
         </div>
+
+        {totalPages > 1 && (
+          <div className="mt-4 flex items-center justify-center gap-4 text-sm">
+            <button
+              type="button"
+              onClick={() => setFeedPage(Math.max(0, page - 1))}
+              disabled={page === 0}
+              className="rounded-lg border px-3 py-1.5 font-medium disabled:opacity-40"
+              style={{ borderColor: "var(--border-hairline)", backgroundColor: "var(--surface)", color: "var(--text-secondary)" }}
+            >
+              ← Newer
+            </button>
+            <span className="tabular-nums" style={{ color: "var(--text-muted)" }}>
+              Page {page + 1} of {totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => setFeedPage(Math.min(totalPages - 1, page + 1))}
+              disabled={page >= totalPages - 1}
+              className="rounded-lg border px-3 py-1.5 font-medium disabled:opacity-40"
+              style={{ borderColor: "var(--border-hairline)", backgroundColor: "var(--surface)", color: "var(--text-secondary)" }}
+            >
+              Older →
+            </button>
+          </div>
+        )}
       </section>
 
       <footer className="mt-10 pb-2 text-center text-xs" style={{ color: "var(--text-muted)" }}>
