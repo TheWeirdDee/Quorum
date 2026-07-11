@@ -79,19 +79,35 @@ describe("startProviderLoop", () => {
     expect(client.acceptNegotiation).not.toHaveBeenCalled();
   });
 
-  it("on order_paid, recalls cached requirements, runs the baseline scan, and delivers the decision (FR-4)", async () => {
+  it("on order_paid, waits for 'paid' status and delivers the LISTING's wire shape: nested blocks as compact-JSON strings", async () => {
     const { stream, fire } = fakeStream();
-    const client = { deliverOrder: vi.fn().mockResolvedValue(undefined), rejectOrder: vi.fn() } as unknown as AgentClient;
+    const client = {
+      deliverOrder: vi.fn().mockResolvedValue(undefined),
+      rejectOrder: vi.fn(),
+      getOrder: vi.fn().mockResolvedValue({ status: "paid" }),
+    } as unknown as AgentClient;
     const cache = new RequirementsCache(db, client);
     cache.remember("order-2", "neg-2", { repo: "https://github.com/acme/thing", ecosystems: ["npm"], risk_policy: "balanced" });
     const runBaseline = vi.fn().mockResolvedValue({ decision: FAKE_DECISION });
 
-    startProviderLoop({ client, stream, requirementsCache: cache, runBaseline });
+    startProviderLoop({ client, stream, requirementsCache: cache, runBaseline, deliverRetryDelayMs: 1 });
     fire(EventType.OrderPaid, { type: EventType.OrderPaid, raw: {}, order_id: "order-2" });
     await flush();
 
     expect(runBaseline).toHaveBeenCalledWith(expect.objectContaining({ repo: "https://github.com/acme/thing" }));
-    expect(client.deliverOrder).toHaveBeenCalledWith("order-2", { deliverableType: "schema", deliverableSchema: JSON.stringify(FAKE_DECISION) });
+    expect(client.getOrder).toHaveBeenCalledWith("order-2");
+    expect(client.deliverOrder).toHaveBeenCalledTimes(1);
+    const [orderId, req] = (client.deliverOrder as ReturnType<typeof vi.fn>).mock.calls[0] as [string, { deliverableType: string; deliverableSchema: string }];
+    expect(orderId).toBe("order-2");
+    expect(req.deliverableType).toBe("schema");
+    const wire = JSON.parse(req.deliverableSchema) as Record<string, unknown>;
+    // The store listing declares these as strings — nested objects got a real order's delivery rejected.
+    expect(typeof wire["event"]).toBe("string");
+    expect(typeof wire["gate"]).toBe("string");
+    expect(typeof wire["lenses"]).toBe("string");
+    expect(typeof wire["escalation"]).toBe("string");
+    expect(JSON.parse(wire["event"] as string)).toEqual(FAKE_DECISION.event);
+    expect(wire["decision"]).toBe("ARCHIVED_NO_ACTION");
     expect(client.rejectOrder).not.toHaveBeenCalled();
   });
 
@@ -112,21 +128,42 @@ describe("startProviderLoop", () => {
     expect(client.rejectOrder).toHaveBeenCalledWith("order-missing", expect.any(String));
   });
 
-  it("rejects the order when the baseline scan / deliverOrder throws after acceptance", async () => {
+  it("retries delivery once, then rejects with a delivery-specific reason when both attempts fail", async () => {
     const { stream, fire } = fakeStream();
     const client = {
       deliverOrder: vi.fn().mockRejectedValue(new Error("network blip")),
       rejectOrder: vi.fn().mockResolvedValue(undefined),
+      getOrder: vi.fn().mockResolvedValue({ status: "paid" }),
     } as unknown as AgentClient;
     const cache = new RequirementsCache(db, client);
     cache.remember("order-3", "neg-3", { repo: "https://github.com/acme/thing", ecosystems: ["npm"], risk_policy: "balanced" });
     const runBaseline = vi.fn().mockResolvedValue({ decision: FAKE_DECISION });
 
-    startProviderLoop({ client, stream, requirementsCache: cache, runBaseline });
+    startProviderLoop({ client, stream, requirementsCache: cache, runBaseline, deliverRetryDelayMs: 1 });
     fire(EventType.OrderPaid, { type: EventType.OrderPaid, raw: {}, order_id: "order-3" });
     await flush();
 
-    expect(client.rejectOrder).toHaveBeenCalledWith("order-3", expect.any(String));
+    expect(client.deliverOrder).toHaveBeenCalledTimes(2);
+    expect(client.rejectOrder).toHaveBeenCalledWith("order-3", "internal error delivering the decision");
+  });
+
+  it("succeeds when the delivery retry lands (transient first failure never rejects the order)", async () => {
+    const { stream, fire } = fakeStream();
+    const client = {
+      deliverOrder: vi.fn().mockRejectedValueOnce(new Error("transient")).mockResolvedValueOnce(undefined),
+      rejectOrder: vi.fn(),
+      getOrder: vi.fn().mockResolvedValue({ status: "paid" }),
+    } as unknown as AgentClient;
+    const cache = new RequirementsCache(db, client);
+    cache.remember("order-4", "neg-4", { repo: "https://github.com/acme/thing", ecosystems: ["npm"], risk_policy: "balanced" });
+    const runBaseline = vi.fn().mockResolvedValue({ decision: FAKE_DECISION });
+
+    startProviderLoop({ client, stream, requirementsCache: cache, runBaseline, deliverRetryDelayMs: 1 });
+    fire(EventType.OrderPaid, { type: EventType.OrderPaid, raw: {}, order_id: "order-4" });
+    await flush();
+
+    expect(client.deliverOrder).toHaveBeenCalledTimes(2);
+    expect(client.rejectOrder).not.toHaveBeenCalled();
   });
 
   it("logs and does nothing when an event carries no negotiation_id/order_id", async () => {
@@ -186,12 +223,13 @@ describe("sweepProviderBacklog", () => {
       ]),
       deliverOrder: vi.fn().mockResolvedValue(undefined),
       rejectOrder: vi.fn(),
+      getOrder: vi.fn().mockResolvedValue({ status: "paid" }),
     } as unknown as AgentClient;
     const cache = new RequirementsCache(db, client);
     cache.remember("order-paid-missed", "neg-x", { repo: "https://github.com/acme/thing", ecosystems: ["npm"], risk_policy: "balanced" });
     const runBaseline = vi.fn().mockResolvedValue({ decision: FAKE_DECISION });
 
-    await sweepProviderBacklog({ client, requirementsCache: cache, runBaseline });
+    await sweepProviderBacklog({ client, requirementsCache: cache, runBaseline, deliverRetryDelayMs: 1 });
 
     expect(client.listOrders).toHaveBeenCalledWith({ role: "provider", pageSize: 50 });
     expect(runBaseline).toHaveBeenCalledTimes(1);

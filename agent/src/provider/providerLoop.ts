@@ -8,6 +8,7 @@ import {
   type EventStream,
 } from "@croo-network/sdk";
 import { logger } from "../config/logger.js";
+import { pollUntil } from "../croo/pollFallback.js";
 import type { QuorumDecision } from "../decision/schema.js";
 import { parseQuorumRequest, type QuorumRequest } from "./requestSchema.js";
 import type { RequirementsCache } from "./requirementsCache.js";
@@ -18,6 +19,26 @@ export interface ProviderLoopParams {
   requirementsCache: RequirementsCache;
   /** Runs the baseline scan for an accepted+paid registration. Injectable so tests can exercise the negotiation/order lifecycle without the full investigate() pipeline; production callers pass `runBaselineScan` bound to db/client/correlator. */
   runBaseline: (request: QuorumRequest) => Promise<{ decision: QuorumDecision }>;
+  /** Pause before the single delivery retry; tests pass ~0 so they don't sleep. */
+  deliverRetryDelayMs?: number;
+}
+
+/**
+ * Flattens a decision into the wire shape the Agent Store LISTING declares:
+ * the service's deliverable schema (filled in on the Configure page)
+ * documents `event`/`gate`/`lenses`/`escalation` as compact-JSON *strings*,
+ * not nested objects — a store-form limitation, same one the request side
+ * hit in reverse (see normalizeWireRequest). Deliver what the listing
+ * promises; the canonical nested form stays in schemas/ and the dashboard.
+ */
+export function toWireDeliverable(decision: QuorumDecision): Record<string, unknown> {
+  return {
+    ...decision,
+    event: JSON.stringify(decision.event),
+    gate: JSON.stringify(decision.gate),
+    lenses: JSON.stringify(decision.lenses),
+    escalation: JSON.stringify(decision.escalation),
+  };
 }
 
 async function safeRejectOrder(client: AgentClient, orderId: string, reason: string): Promise<void> {
@@ -87,6 +108,7 @@ async function handleOrderPaid(
   cache: RequirementsCache,
   runBaseline: ProviderLoopParams["runBaseline"],
   event: Event,
+  deliverRetryDelayMs: number,
 ): Promise<void> {
   const orderId = event.order_id;
   if (!orderId) {
@@ -96,7 +118,7 @@ async function handleOrderPaid(
   if (inFlightOrders.has(orderId)) return;
   inFlightOrders.add(orderId);
   try {
-    await processPaidOrder(client, cache, runBaseline, orderId);
+    await processPaidOrder(client, cache, runBaseline, orderId, deliverRetryDelayMs);
   } finally {
     inFlightOrders.delete(orderId);
   }
@@ -107,6 +129,7 @@ async function processPaidOrder(
   cache: RequirementsCache,
   runBaseline: ProviderLoopParams["runBaseline"],
   orderId: string,
+  deliverRetryDelayMs: number,
 ): Promise<void> {
   const request = await cache.recall(orderId);
   if (!request) {
@@ -115,13 +138,45 @@ async function processPaidOrder(
     return;
   }
 
+  let decision: QuorumDecision;
   try {
-    const { decision } = await runBaseline(request);
-    await client.deliverOrder(orderId, { deliverableType: DeliverableType.Schema, deliverableSchema: JSON.stringify(decision) });
+    ({ decision } = await runBaseline(request));
+  } catch (err) {
+    logger.error(`providerLoop: baseline scan failed for order ${orderId}:`, err);
+    await safeRejectOrder(client, orderId, "internal error running the baseline scan");
+    return;
+  }
+
+  // The order_paid signal can precede the order actually settling into
+  // 'paid' (the same async chain-confirmation gap the requester side
+  // measured at 24-40s for creating->created). Delivering into the wrong
+  // status errors, so wait for 'paid' first — and if the wait itself times
+  // out, still attempt delivery rather than throwing away a finished scan.
+  try {
+    await pollUntil({
+      poll: async () => ((await client.getOrder(orderId)).status === OrderStatus.Paid ? (true as const) : undefined),
+      timeoutMs: 60_000,
+      pollIntervalMs: 3_000,
+      timeoutMessage: `order ${orderId} did not reach 'paid' status within 60s`,
+    });
+  } catch (err) {
+    logger.warn(`providerLoop: proceeding to deliver ${orderId} despite the paid-status wait failing:`, err);
+  }
+
+  const deliverable = { deliverableType: DeliverableType.Schema, deliverableSchema: JSON.stringify(toWireDeliverable(decision)) };
+  try {
+    await client.deliverOrder(orderId, deliverable);
     logger.info(`providerLoop: delivered order ${orderId} (repo=${request.repo}, decision=${decision.decision})`);
   } catch (err) {
-    logger.error(`providerLoop: baseline scan / deliverOrder failed for order ${orderId}:`, err);
-    await safeRejectOrder(client, orderId, "internal error running the baseline scan");
+    logger.error(`providerLoop: deliverOrder(${orderId}) failed — retrying once in ${deliverRetryDelayMs}ms:`, err);
+    await new Promise((resolve) => setTimeout(resolve, deliverRetryDelayMs));
+    try {
+      await client.deliverOrder(orderId, deliverable);
+      logger.info(`providerLoop: delivered order ${orderId} on retry (repo=${request.repo}, decision=${decision.decision})`);
+    } catch (retryErr) {
+      logger.error(`providerLoop: deliverOrder(${orderId}) retry also failed — rejecting to release escrow:`, retryErr);
+      await safeRejectOrder(client, orderId, "internal error delivering the decision");
+    }
   }
 }
 
@@ -140,14 +195,14 @@ async function processPaidOrder(
  * calls rejectOrder to release escrow (SPEC §3).
  */
 export function startProviderLoop(params: ProviderLoopParams): void {
-  const { client, stream, requirementsCache, runBaseline } = params;
+  const { client, stream, requirementsCache, runBaseline, deliverRetryDelayMs = 5_000 } = params;
 
   stream.on(EventType.NegotiationCreated, (event) => {
     void handleNegotiationCreated(client, requirementsCache, event);
   });
 
   stream.on(EventType.OrderPaid, (event) => {
-    void handleOrderPaid(client, requirementsCache, runBaseline, event);
+    void handleOrderPaid(client, requirementsCache, runBaseline, event, deliverRetryDelayMs);
   });
 }
 
@@ -168,7 +223,7 @@ export function startProviderLoop(params: ProviderLoopParams): void {
  * are "provider" here, but don't copy these values across endpoints.
  */
 export async function sweepProviderBacklog(params: Omit<ProviderLoopParams, "stream">): Promise<void> {
-  const { client, requirementsCache, runBaseline } = params;
+  const { client, requirementsCache, runBaseline, deliverRetryDelayMs = 5_000 } = params;
 
   // Deliberately NOT passing a server-side `status` filter to either list
   // call: a live pending negotiation went unfound by
@@ -204,11 +259,13 @@ export async function sweepProviderBacklog(params: Omit<ProviderLoopParams, "str
     }
     for (const order of orders.filter((o) => o.status === OrderStatus.Paid)) {
       logger.info(`providerLoop sweep: found paid undelivered order ${order.orderId} with no seen event — processing`);
-      await handleOrderPaid(client, requirementsCache, runBaseline, {
-        type: EventType.OrderPaid,
-        raw: {},
-        order_id: order.orderId,
-      });
+      await handleOrderPaid(
+        client,
+        requirementsCache,
+        runBaseline,
+        { type: EventType.OrderPaid, raw: {}, order_id: order.orderId },
+        deliverRetryDelayMs,
+      );
     }
   } catch (err) {
     logger.error("providerLoop sweep: listOrders failed:", err);
