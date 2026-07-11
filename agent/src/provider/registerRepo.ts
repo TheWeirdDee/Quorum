@@ -81,7 +81,12 @@ export async function runBaselineScan(params: RunBaselineScanParams): Promise<Ba
 
   let dependencyCount = 0;
   if (request.ecosystems.includes("npm")) {
-    const deps = await resolveNpmDependencies(request.repo);
+    // A thrown fetch here (GitHub API hiccup/rate limit) must degrade to
+    // "0 dependencies indexed", not fail the whole paid order.
+    const deps = await resolveNpmDependencies(request.repo).catch((err) => {
+      logger.warn(`runBaselineScan: dependency resolution threw for ${request.repo} — continuing with none:`, err);
+      return undefined;
+    });
     if (deps) {
       for (const dep of deps) {
         upsertDependency(db, { repoId: repo.id, name: dep.name, version: dep.version, isProduction: dep.isProduction });
@@ -93,7 +98,12 @@ export async function runBaselineScan(params: RunBaselineScanParams): Promise<Ba
   }
 
   const admitted =
-    dependencyCount > 0 ? await pollRepoForNewEvents(db, repo.id, request.repo, env.BASELINE_SCAN_MAX_DEPS) : [];
+    dependencyCount > 0
+      ? await pollRepoForNewEvents(db, repo.id, request.repo, env.BASELINE_SCAN_MAX_DEPS).catch((err) => {
+          logger.warn(`runBaselineScan: detection sweep threw for ${request.repo} — delivering an honest zero-event baseline:`, err);
+          return [];
+        })
+      : [];
 
   const policy = getRiskPolicy(
     request.risk_policy,
@@ -102,21 +112,25 @@ export async function runBaselineScan(params: RunBaselineScanParams): Promise<Ba
   const investigable = admitted.filter((event) => riskGate(event, policy).investigated);
 
   for (const event of investigable) {
-    const result = await processEvent({
-      db,
-      client: params.client,
-      correlator: params.correlator,
-      repo,
-      event,
-      simulate: params.simulate,
-      simulatedHealthRaw: params.simulatedHealthRaw,
-      simulatedTrustRaw: params.simulatedTrustRaw,
-      simulatedEscalationRaw: params.simulatedEscalationRaw,
-    });
-    if (result.ok) {
-      return { decision: result.decision, repo, dependencyCount };
+    try {
+      const result = await processEvent({
+        db,
+        client: params.client,
+        correlator: params.correlator,
+        repo,
+        event,
+        simulate: params.simulate,
+        simulatedHealthRaw: params.simulatedHealthRaw,
+        simulatedTrustRaw: params.simulatedTrustRaw,
+        simulatedEscalationRaw: params.simulatedEscalationRaw,
+      });
+      if (result.ok) {
+        return { decision: result.decision, repo, dependencyCount };
+      }
+      logger.warn(`runBaselineScan: ${event.dependency} degraded at registration (${result.reason}) — trying the next candidate, if any`);
+    } catch (err) {
+      logger.warn(`runBaselineScan: ${event.dependency} threw at registration — trying the next candidate, if any:`, err);
     }
-    logger.warn(`runBaselineScan: ${event.dependency} degraded at registration (${result.reason}) — trying the next candidate, if any`);
   }
 
   const degradedCount = investigable.length;

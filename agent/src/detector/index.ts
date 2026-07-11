@@ -85,8 +85,15 @@ export async function pollRepoForNewEvents(
 
   const allEvents: TrustEvent[] = [];
   for (const dep of bounded) {
-    const events = await detectTrustEvents({ name: dep.name, version: dep.version });
-    allEvents.push(...events);
+    // One dependency's flaky fetch (OSV/npm/GitHub network hiccup) must not
+    // kill the whole sweep — CONFIRMED live: a real paid order's baseline
+    // scan died on a single throw and the buyer got refunded for it.
+    try {
+      const events = await detectTrustEvents({ name: dep.name, version: dep.version });
+      allEvents.push(...events);
+    } catch (err) {
+      logger.warn(`Event detection failed for ${dep.name} — skipping this dependency this sweep:`, err);
+    }
   }
 
   return admitNewEvents(db, allEvents, repoId);

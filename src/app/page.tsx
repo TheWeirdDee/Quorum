@@ -111,13 +111,22 @@ function Nav() {
           <a href="#use" className="hover:opacity-70">Use it</a>
           <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer" className="hover:opacity-70">GitHub</a>
         </div>
-        <Link
-          href="/dashboard"
-          className="rounded-xl px-4 py-2 text-sm font-semibold transition-opacity hover:opacity-85"
-          style={{ backgroundColor: "var(--navy)", color: "#fffdf8" }}
-        >
-          Live dashboard
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/dashboard?demo=true"
+            className="rounded-xl px-4 py-2 text-sm font-bold transition-opacity hover:opacity-85"
+            style={{ backgroundColor: "var(--green)", color: "var(--navy)" }}
+          >
+            Demo
+          </Link>
+          <Link
+            href="/dashboard"
+            className="rounded-xl px-4 py-2 text-sm font-semibold transition-opacity hover:opacity-85"
+            style={{ backgroundColor: "var(--navy)", color: "#fffdf8" }}
+          >
+            Live dashboard
+          </Link>
+        </div>
       </nav>
     </div>
   );
