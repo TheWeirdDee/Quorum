@@ -17,7 +17,7 @@ import { env } from "../src/config/env.js";
 import { logger } from "../src/config/logger.js";
 import { connectCrooEventStream, confirmAuth, createCrooClient } from "../src/croo/client.js";
 import { OrderEventCorrelator } from "../src/croo/orderCorrelator.js";
-import { startProviderLoop } from "../src/provider/providerLoop.js";
+import { startProviderLoop, sweepProviderBacklog } from "../src/provider/providerLoop.js";
 import { runBaselineScan } from "../src/provider/registerRepo.js";
 import { RequirementsCache } from "../src/provider/requirementsCache.js";
 import { openDb } from "../src/store/db.js";
@@ -46,13 +46,22 @@ async function main(): Promise<void> {
   const correlator = new OrderEventCorrelator(stream);
   const requirementsCache = new RequirementsCache(db, client);
 
-  startProviderLoop({
-    client,
-    stream,
-    requirementsCache,
-    runBaseline: (request) => runBaselineScan({ db, client, correlator, request, simulate: env.CROO_SIMULATE }),
-  });
+  const runBaseline = (request: Parameters<typeof runBaselineScan>[0]["request"]) =>
+    runBaselineScan({ db, client, correlator, request, simulate: env.CROO_SIMULATE });
+
+  startProviderLoop({ client, stream, requirementsCache, runBaseline });
   logger.info("worker: provider loop live — listening for order_negotiation_created / order_paid");
+
+  // Catch up on anything that arrived while this process was down (e.g. a
+  // free-tier host stopping an idle instance) — a pending negotiation or a
+  // paid order whose WS event fired into the void. Once at boot, then every
+  // minute as a poll fallback for dropped events while running.
+  const sweep = () =>
+    sweepProviderBacklog({ client, requirementsCache, runBaseline }).catch((err) =>
+      logger.error("worker: provider backlog sweep failed:", err),
+    );
+  void sweep();
+  const sweepTimer = setInterval(sweep, 60_000);
 
   const { stop: stopPolling } = startPollLoop({ db, client, correlator, simulate: env.CROO_SIMULATE });
   logger.info(`worker: poll loop started (every ${env.POLL_INTERVAL_MINUTES} minute(s))`);
@@ -69,6 +78,7 @@ async function main(): Promise<void> {
 
   const shutdown = () => {
     logger.info("worker: shutting down");
+    clearInterval(sweepTimer);
     stopPolling();
     readApi?.close();
     stream.close();

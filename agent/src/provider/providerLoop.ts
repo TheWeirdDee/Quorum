@@ -20,12 +20,31 @@ async function safeRejectOrder(client: AgentClient, orderId: string, reason: str
   }
 }
 
+/**
+ * The backlog sweep (below) and the WS handlers can race on the same
+ * negotiation/order — e.g. an event arriving mid-sweep. The backend rejects
+ * the duplicate accept/deliver anyway, but these guards keep the logs clean
+ * and the work single-flight.
+ */
+const inFlightNegotiations = new Set<string>();
+const inFlightOrders = new Set<string>();
+
 async function handleNegotiationCreated(client: AgentClient, cache: RequirementsCache, event: Event): Promise<void> {
   const negotiationId = event.negotiation_id;
   if (!negotiationId) {
     logger.error("providerLoop: order_negotiation_created event carried no negotiation_id");
     return;
   }
+  if (inFlightNegotiations.has(negotiationId)) return;
+  inFlightNegotiations.add(negotiationId);
+  try {
+    await processNegotiation(client, cache, negotiationId);
+  } finally {
+    inFlightNegotiations.delete(negotiationId);
+  }
+}
+
+async function processNegotiation(client: AgentClient, cache: RequirementsCache, negotiationId: string): Promise<void> {
 
   let requirements: string;
   try {
@@ -66,7 +85,21 @@ async function handleOrderPaid(
     logger.error("providerLoop: order_paid event carried no order_id");
     return;
   }
+  if (inFlightOrders.has(orderId)) return;
+  inFlightOrders.add(orderId);
+  try {
+    await processPaidOrder(client, cache, runBaseline, orderId);
+  } finally {
+    inFlightOrders.delete(orderId);
+  }
+}
 
+async function processPaidOrder(
+  client: AgentClient,
+  cache: RequirementsCache,
+  runBaseline: ProviderLoopParams["runBaseline"],
+  orderId: string,
+): Promise<void> {
   const request = await cache.recall(orderId);
   if (!request) {
     logger.error(`providerLoop: order ${orderId} paid but no cached quorum.register requirements were found — rejecting to release escrow`);
@@ -108,4 +141,52 @@ export function startProviderLoop(params: ProviderLoopParams): void {
   stream.on(EventType.OrderPaid, (event) => {
     void handleOrderPaid(client, requirementsCache, runBaseline, event);
   });
+}
+
+/**
+ * Catches up on provider work whose WS event was never seen. CONFIRMED
+ * needed in production: the provider loop is otherwise purely event-driven,
+ * so a negotiation created while the worker was down (e.g. Render's free
+ * tier stopping an idle instance) sat in "pending" forever — a real buyer's
+ * real order did exactly this. Polls the two states the WS pair would have
+ * announced: pending negotiations (missed order_negotiation_created) and
+ * paid-but-undelivered orders (missed order_paid), and routes each through
+ * the same single-flight handlers the events use. Run once at startup and
+ * on an interval; safe to overlap with live events thanks to the in-flight
+ * guards + the backend rejecting duplicate accepts/deliveries.
+ *
+ * Vocabulary trap (SDK_NOTES.md item 14): listNegotiations wants role
+ * "provider"|"requester" while listOrders wants "provider"|"buyer" — both
+ * are "provider" here, but don't copy these values across endpoints.
+ */
+export async function sweepProviderBacklog(params: Omit<ProviderLoopParams, "stream">): Promise<void> {
+  const { client, requirementsCache, runBaseline } = params;
+
+  try {
+    const pending = await client.listNegotiations({ role: "provider", status: "pending", pageSize: 50 });
+    for (const negotiation of pending) {
+      logger.info(`providerLoop sweep: found pending negotiation ${negotiation.negotiationId} with no seen event — processing`);
+      await handleNegotiationCreated(client, requirementsCache, {
+        type: EventType.NegotiationCreated,
+        raw: {},
+        negotiation_id: negotiation.negotiationId,
+      });
+    }
+  } catch (err) {
+    logger.error("providerLoop sweep: listNegotiations failed:", err);
+  }
+
+  try {
+    const paid = await client.listOrders({ role: "provider", status: "paid", pageSize: 50 });
+    for (const order of paid) {
+      logger.info(`providerLoop sweep: found paid undelivered order ${order.orderId} with no seen event — processing`);
+      await handleOrderPaid(client, requirementsCache, runBaseline, {
+        type: EventType.OrderPaid,
+        raw: {},
+        order_id: order.orderId,
+      });
+    }
+  } catch (err) {
+    logger.error("providerLoop sweep: listOrders failed:", err);
+  }
 }

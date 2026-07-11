@@ -2,7 +2,7 @@ import { EventType, type AgentClient, type Event, type EventStream, type EventTy
 import type Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QuorumDecision } from "../../src/decision/schema.js";
-import { startProviderLoop } from "../../src/provider/providerLoop.js";
+import { startProviderLoop, sweepProviderBacklog } from "../../src/provider/providerLoop.js";
 import { RequirementsCache } from "../../src/provider/requirementsCache.js";
 import { openDb } from "../../src/store/db.js";
 
@@ -141,5 +141,61 @@ describe("startProviderLoop", () => {
 
     expect(client.getNegotiation).not.toHaveBeenCalled();
     expect(client.deliverOrder).not.toHaveBeenCalled();
+  });
+});
+
+describe("sweepProviderBacklog", () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = openDb(":memory:");
+  });
+
+  afterEach(() => db.close());
+
+  it("accepts a pending negotiation whose order_negotiation_created event was never seen (worker was down)", async () => {
+    const client = {
+      listNegotiations: vi.fn().mockResolvedValue([{ negotiationId: "neg-missed" }]),
+      listOrders: vi.fn().mockResolvedValue([]),
+      getNegotiation: vi.fn().mockResolvedValue({ requirements: VALID_REQUEST_JSON }),
+      acceptNegotiation: vi.fn().mockResolvedValue({ negotiation: {}, order: { orderId: "order-missed" } }),
+      rejectNegotiation: vi.fn(),
+    } as unknown as AgentClient;
+    const cache = new RequirementsCache(db, client);
+
+    await sweepProviderBacklog({ client, requirementsCache: cache, runBaseline: vi.fn() });
+
+    expect(client.listNegotiations).toHaveBeenCalledWith({ role: "provider", status: "pending", pageSize: 50 });
+    expect(client.acceptNegotiation).toHaveBeenCalledWith("neg-missed");
+    const recalled = await cache.recall("order-missed");
+    expect(recalled?.repo).toBe("https://github.com/acme/thing");
+  });
+
+  it("delivers a paid order whose order_paid event was never seen", async () => {
+    const client = {
+      listNegotiations: vi.fn().mockResolvedValue([]),
+      listOrders: vi.fn().mockResolvedValue([{ orderId: "order-paid-missed" }]),
+      deliverOrder: vi.fn().mockResolvedValue(undefined),
+      rejectOrder: vi.fn(),
+    } as unknown as AgentClient;
+    const cache = new RequirementsCache(db, client);
+    cache.remember("order-paid-missed", "neg-x", { repo: "https://github.com/acme/thing", ecosystems: ["npm"], risk_policy: "balanced" });
+    const runBaseline = vi.fn().mockResolvedValue({ decision: FAKE_DECISION });
+
+    await sweepProviderBacklog({ client, requirementsCache: cache, runBaseline });
+
+    expect(client.listOrders).toHaveBeenCalledWith({ role: "provider", status: "paid", pageSize: 50 });
+    expect(runBaseline).toHaveBeenCalled();
+    expect(client.deliverOrder).toHaveBeenCalledWith("order-paid-missed", expect.objectContaining({ deliverableType: "schema" }));
+  });
+
+  it("survives both list calls failing (logs, never throws)", async () => {
+    const client = {
+      listNegotiations: vi.fn().mockRejectedValue(new Error("api down")),
+      listOrders: vi.fn().mockRejectedValue(new Error("api down")),
+    } as unknown as AgentClient;
+    const cache = new RequirementsCache(db, client);
+
+    await expect(sweepProviderBacklog({ client, requirementsCache: cache, runBaseline: vi.fn() })).resolves.toBeUndefined();
   });
 });
