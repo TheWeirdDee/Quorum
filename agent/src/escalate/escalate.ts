@@ -131,6 +131,7 @@ export async function escalate(params: EscalationParams): Promise<EscalationOutc
     simulatedRaw: params.simulatedRaw,
     timeouts: params.timeouts,
     serviceId: params.serviceId,
+    maxCostUsdc: budgetRemaining,
   });
 
   if (!outcome.ok) {

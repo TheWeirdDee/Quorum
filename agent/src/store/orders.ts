@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { QuorumDb } from "./db.js";
 
 export type OrderDirection = "inbound" | "outbound";
 
@@ -33,32 +33,49 @@ export interface InsertOrderInput {
  * as provider) from orders it buys (outbound, as requester) on the shared
  * WebSocket connection — see SPEC §6.
  */
-export function insertOrder(db: Database.Database, input: InsertOrderInput): OrderRecord {
-  const result = db
-    .prepare(
-      `INSERT INTO orders (direction, order_id, negotiation_id, counterparty, decision_id, status, cost_usdc, tx, requirements_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      input.direction,
-      input.orderId,
-      input.negotiationId ?? null,
-      input.counterparty ?? null,
-      input.decisionId ?? null,
-      input.status ?? "pending",
-      input.costUsdc ?? null,
-      input.tx ?? null,
-      input.requirements ? JSON.stringify(input.requirements) : null,
-      new Date().toISOString(),
-    );
+export async function insertOrder(db: QuorumDb, input: InsertOrderInput): Promise<OrderRecord> {
+  const [created] = await db<OrderRecord>("orders")
+    .insert({
+      direction: input.direction,
+      order_id: input.orderId,
+      negotiation_id: input.negotiationId ?? null,
+      counterparty: input.counterparty ?? null,
+      decision_id: input.decisionId ?? null,
+      status: input.status ?? "pending",
+      cost_usdc: input.costUsdc ?? null,
+      tx: input.tx ?? null,
+      requirements_json: input.requirements ? JSON.stringify(input.requirements) : null,
+      created_at: new Date().toISOString(),
+    })
+    .returning("*");
 
-  const created = db
-    .prepare(`SELECT * FROM orders WHERE id = ?`)
-    .get(Number(result.lastInsertRowid)) as OrderRecord | undefined;
   if (!created) throw new Error("Failed to read back order after insert");
   return created;
 }
 
-export function getOrderByOrderId(db: Database.Database, orderId: string): OrderRecord | undefined {
-  return db.prepare(`SELECT * FROM orders WHERE order_id = ?`).get(orderId) as OrderRecord | undefined;
+export async function getOrderByOrderId(db: QuorumDb, orderId: string): Promise<OrderRecord | undefined> {
+  return db<OrderRecord>("orders").where({ order_id: orderId }).first();
+}
+
+/**
+ * Atomically claims an inbound order for baseline processing.
+ *
+ * The provider backlog sweep and WebSocket handler can see the same paid
+ * order, and a process restart can see it again later. A process-local Set
+ * only protects one runtime; this persisted compare-and-swap makes outbound
+ * spending at-most-once for the lifetime of the order. We deliberately do
+ * not reclaim `processing` after a crash: failing closed lets CAP refund the
+ * buyer instead of risking another set of autonomous purchases.
+ */
+export async function claimInboundOrderProcessing(db: QuorumDb, orderId: string): Promise<boolean> {
+  const changed = await db("orders")
+    .where({ order_id: orderId, direction: "inbound" })
+    .whereIn("status", ["pending", "accepted", "paid"])
+    .update({ status: "processing" });
+  return changed === 1;
+}
+
+/** Updates the local lifecycle marker used by the provider's replay guard. */
+export async function updateOrderStatus(db: QuorumDb, orderId: string, status: string): Promise<void> {
+  await db("orders").where({ order_id: orderId }).update({ status });
 }

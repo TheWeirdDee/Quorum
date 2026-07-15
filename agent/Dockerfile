@@ -25,9 +25,9 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
 
-# quorum.db lives here — mount a persistent volume at this path in production
-# (Render disk / Railway volume / Fly volume) or the worker's state resets on
-# every deploy/restart.
+# Local/paid-disk fallback. Render Free overrides DATABASE_URL with a durable
+# Neon postgresql:// connection string, so its ephemeral filesystem is not
+# part of the safety boundary.
 VOLUME ["/app/data"]
 ENV DATABASE_URL=file:/app/data/quorum.db
 

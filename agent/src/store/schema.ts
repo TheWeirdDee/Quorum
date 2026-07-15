@@ -1,70 +1,77 @@
-import type Database from "better-sqlite3";
+import type { Knex } from "knex";
 
-const MIGRATIONS: readonly string[] = [
-  `CREATE TABLE IF NOT EXISTS repos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    github_url TEXT NOT NULL UNIQUE,
-    risk_policy TEXT NOT NULL,
-    budget_cap_usdc REAL,
-    notify_type TEXT,
-    notify_webhook TEXT,
-    created_at TEXT NOT NULL
-  )`,
-  `CREATE TABLE IF NOT EXISTS dependencies (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    repo_id INTEGER NOT NULL REFERENCES repos(id),
-    name TEXT NOT NULL,
-    version TEXT,
-    ecosystem TEXT NOT NULL DEFAULT 'npm',
-    is_production INTEGER NOT NULL DEFAULT 1,
-    github_repo_url TEXT,
-    maintainers_json TEXT,
-    is_archived INTEGER,
-    license TEXT,
-    created_at TEXT NOT NULL,
-    UNIQUE(repo_id, name, ecosystem)
-  )`,
-  `CREATE TABLE IF NOT EXISTS seen_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    repo_id INTEGER REFERENCES repos(id),
-    dependency TEXT NOT NULL,
-    type TEXT NOT NULL,
-    ref TEXT NOT NULL,
-    severity_hint TEXT NOT NULL,
-    source TEXT NOT NULL,
-    observed_at TEXT NOT NULL,
-    context_json TEXT,
-    first_seen_at TEXT NOT NULL,
-    UNIQUE(dependency, type, ref)
-  )`,
-  `CREATE TABLE IF NOT EXISTS decisions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_id INTEGER REFERENCES seen_events(id),
-    payload_json TEXT NOT NULL,
-    decision TEXT NOT NULL,
-    confidence REAL NOT NULL,
-    total_spend_usdc REAL NOT NULL,
-    decided_at TEXT NOT NULL
-  )`,
-  `CREATE TABLE IF NOT EXISTS orders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    direction TEXT NOT NULL CHECK (direction IN ('inbound', 'outbound')),
-    order_id TEXT NOT NULL UNIQUE,
-    negotiation_id TEXT,
-    counterparty TEXT,
-    decision_id INTEGER REFERENCES decisions(id),
-    status TEXT NOT NULL DEFAULT 'pending',
-    cost_usdc REAL,
-    tx TEXT,
-    requirements_json TEXT,
-    created_at TEXT NOT NULL
-  )`,
-];
+/** Cross-dialect bootstrap migration for SQLite (local/tests) and PostgreSQL (Neon). */
+export async function migrate(db: Knex): Promise<void> {
+  if (!(await db.schema.hasTable("repos"))) {
+    await db.schema.createTable("repos", (table) => {
+      table.increments("id").primary();
+      table.text("github_url").notNullable().unique();
+      table.text("risk_policy").notNullable();
+      table.double("budget_cap_usdc").nullable();
+      table.text("notify_type").nullable();
+      table.text("notify_webhook").nullable();
+      table.text("created_at").notNullable();
+    });
+  }
 
-export function migrate(db: Database.Database): void {
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  for (const statement of MIGRATIONS) {
-    db.exec(statement);
+  if (!(await db.schema.hasTable("dependencies"))) {
+    await db.schema.createTable("dependencies", (table) => {
+      table.increments("id").primary();
+      table.integer("repo_id").notNullable().references("id").inTable("repos");
+      table.text("name").notNullable();
+      table.text("version").nullable();
+      table.text("ecosystem").notNullable().defaultTo("npm");
+      table.integer("is_production").notNullable().defaultTo(1);
+      table.text("github_repo_url").nullable();
+      table.text("maintainers_json").nullable();
+      table.integer("is_archived").nullable();
+      table.text("license").nullable();
+      table.text("created_at").notNullable();
+      table.unique(["repo_id", "name", "ecosystem"]);
+    });
+  }
+
+  if (!(await db.schema.hasTable("seen_events"))) {
+    await db.schema.createTable("seen_events", (table) => {
+      table.increments("id").primary();
+      table.integer("repo_id").nullable().references("id").inTable("repos");
+      table.text("dependency").notNullable();
+      table.text("type").notNullable();
+      table.text("ref").notNullable();
+      table.text("severity_hint").notNullable();
+      table.text("source").notNullable();
+      table.text("observed_at").notNullable();
+      table.text("context_json").nullable();
+      table.text("first_seen_at").notNullable();
+      table.unique(["dependency", "type", "ref"]);
+    });
+  }
+
+  if (!(await db.schema.hasTable("decisions"))) {
+    await db.schema.createTable("decisions", (table) => {
+      table.increments("id").primary();
+      table.integer("event_id").nullable().references("id").inTable("seen_events");
+      table.text("payload_json").notNullable();
+      table.text("decision").notNullable();
+      table.double("confidence").notNullable();
+      table.double("total_spend_usdc").notNullable();
+      table.text("decided_at").notNullable();
+    });
+  }
+
+  if (!(await db.schema.hasTable("orders"))) {
+    await db.schema.createTable("orders", (table) => {
+      table.increments("id").primary();
+      table.text("direction").notNullable();
+      table.text("order_id").notNullable().unique();
+      table.text("negotiation_id").nullable();
+      table.text("counterparty").nullable();
+      table.integer("decision_id").nullable().references("id").inTable("decisions");
+      table.text("status").notNullable().defaultTo("pending");
+      table.double("cost_usdc").nullable();
+      table.text("tx").nullable();
+      table.text("requirements_json").nullable();
+      table.text("created_at").notNullable();
+    });
   }
 }

@@ -1,10 +1,10 @@
 import { EventType, type AgentClient, type Event, type EventStream, type EventTypeName } from "@croo-network/sdk";
-import type Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QuorumDecision } from "../../src/decision/schema.js";
 import { startProviderLoop, sweepProviderBacklog } from "../../src/provider/providerLoop.js";
 import { RequirementsCache } from "../../src/provider/requirementsCache.js";
-import { openDb } from "../../src/store/db.js";
+import { closeDb, openDb, type QuorumDb } from "../../src/store/db.js";
+import { getOrderByOrderId } from "../../src/store/orders.js";
 
 function fakeStream() {
   const handlers = new Map<string, (event: Event) => void>();
@@ -36,13 +36,13 @@ const FAKE_DECISION: QuorumDecision = {
 };
 
 describe("startProviderLoop", () => {
-  let db: Database.Database;
+  let db: QuorumDb;
 
-  beforeEach(() => {
-    db = openDb(":memory:");
+  beforeEach(async () => {
+    db = await openDb(":memory:");
   });
 
-  afterEach(() => db.close());
+  afterEach(async () => closeDb(db));
 
   it("accepts a valid negotiation and caches the requirements under the returned orderId (FR-2, FR-3)", async () => {
     const { stream, fire } = fakeStream();
@@ -87,7 +87,7 @@ describe("startProviderLoop", () => {
       getOrder: vi.fn().mockResolvedValue({ status: "paid" }),
     } as unknown as AgentClient;
     const cache = new RequirementsCache(db, client);
-    cache.remember("order-2", "neg-2", { repo: "https://github.com/acme/thing", ecosystems: ["npm"], risk_policy: "balanced" });
+    await cache.remember("order-2", "neg-2", { repo: "https://github.com/acme/thing", ecosystems: ["npm"], risk_policy: "balanced" });
     const runBaseline = vi.fn().mockResolvedValue({ decision: FAKE_DECISION });
 
     startProviderLoop({ client, stream, requirementsCache: cache, runBaseline, deliverRetryDelayMs: 1 });
@@ -140,7 +140,7 @@ describe("startProviderLoop", () => {
       getOrder: vi.fn().mockResolvedValue({ status: "paid" }),
     } as unknown as AgentClient;
     const cache = new RequirementsCache(db, client);
-    cache.remember("order-3", "neg-3", { repo: "https://github.com/acme/thing", ecosystems: ["npm"], risk_policy: "balanced" });
+    await cache.remember("order-3", "neg-3", { repo: "https://github.com/acme/thing", ecosystems: ["npm"], risk_policy: "balanced" });
     const runBaseline = vi.fn().mockResolvedValue({ decision: FAKE_DECISION });
 
     startProviderLoop({ client, stream, requirementsCache: cache, runBaseline, deliverRetryDelayMs: 1 });
@@ -159,7 +159,7 @@ describe("startProviderLoop", () => {
       getOrder: vi.fn().mockResolvedValue({ status: "paid" }),
     } as unknown as AgentClient;
     const cache = new RequirementsCache(db, client);
-    cache.remember("order-4", "neg-4", { repo: "https://github.com/acme/thing", ecosystems: ["npm"], risk_policy: "balanced" });
+    await cache.remember("order-4", "neg-4", { repo: "https://github.com/acme/thing", ecosystems: ["npm"], risk_policy: "balanced" });
     const runBaseline = vi.fn().mockResolvedValue({ decision: FAKE_DECISION });
 
     startProviderLoop({ client, stream, requirementsCache: cache, runBaseline, deliverRetryDelayMs: 1 });
@@ -168,6 +168,81 @@ describe("startProviderLoop", () => {
 
     expect(client.deliverOrder).toHaveBeenCalledTimes(2);
     expect(client.rejectOrder).not.toHaveBeenCalled();
+  });
+
+  it("persists an at-most-once claim so a later paid event cannot rerun outbound spending", async () => {
+    const { stream, fire } = fakeStream();
+    const client = {
+      deliverOrder: vi.fn().mockResolvedValue(undefined),
+      rejectOrder: vi.fn(),
+      getOrder: vi.fn().mockResolvedValue({ status: "paid", slaDeadline: "" }),
+    } as unknown as AgentClient;
+    const cache = new RequirementsCache(db, client);
+    await cache.remember("order-once", "neg-once", {
+      repo: "https://github.com/acme/thing",
+      ecosystems: ["npm"],
+      risk_policy: "balanced",
+    });
+    const runBaseline = vi.fn().mockResolvedValue({ decision: FAKE_DECISION });
+
+    startProviderLoop({ client, stream, requirementsCache: cache, runBaseline, deliverRetryDelayMs: 1 });
+    fire(EventType.OrderPaid, { type: EventType.OrderPaid, raw: {}, order_id: "order-once" });
+    await flush();
+    fire(EventType.OrderPaid, { type: EventType.OrderPaid, raw: {}, order_id: "order-once" });
+    await flush();
+
+    expect(runBaseline).toHaveBeenCalledTimes(1);
+    expect(client.deliverOrder).toHaveBeenCalledTimes(1);
+    expect((await getOrderByOrderId(db, "order-once"))?.status).toBe("delivered");
+  });
+
+  it("does not run the baseline when the parent order is already terminal", async () => {
+    const { stream, fire } = fakeStream();
+    const client = {
+      deliverOrder: vi.fn(),
+      rejectOrder: vi.fn().mockResolvedValue(undefined),
+      getOrder: vi.fn().mockResolvedValue({ status: "expired", slaDeadline: "" }),
+    } as unknown as AgentClient;
+    const cache = new RequirementsCache(db, client);
+    await cache.remember("order-expired", "neg-expired", {
+      repo: "https://github.com/acme/thing",
+      ecosystems: ["npm"],
+      risk_policy: "balanced",
+    });
+    const runBaseline = vi.fn();
+
+    startProviderLoop({ client, stream, requirementsCache: cache, runBaseline });
+    fire(EventType.OrderPaid, { type: EventType.OrderPaid, raw: {}, order_id: "order-expired" });
+    await flush();
+
+    expect(runBaseline).not.toHaveBeenCalled();
+    expect(client.deliverOrder).not.toHaveBeenCalled();
+  });
+
+  it("reserves one minute of the parent SLA and passes the spending deadline to the baseline", async () => {
+    const { stream, fire } = fakeStream();
+    const slaDeadline = new Date(Date.now() + 10 * 60_000).toISOString();
+    const client = {
+      deliverOrder: vi.fn().mockResolvedValue(undefined),
+      rejectOrder: vi.fn(),
+      getOrder: vi.fn().mockResolvedValue({ status: "paid", slaDeadline }),
+    } as unknown as AgentClient;
+    const cache = new RequirementsCache(db, client);
+    await cache.remember("order-deadline", "neg-deadline", {
+      repo: "https://github.com/acme/thing",
+      ecosystems: ["npm"],
+      risk_policy: "balanced",
+    });
+    const runBaseline = vi.fn().mockResolvedValue({ decision: FAKE_DECISION });
+
+    startProviderLoop({ client, stream, requirementsCache: cache, runBaseline });
+    fire(EventType.OrderPaid, { type: EventType.OrderPaid, raw: {}, order_id: "order-deadline" });
+    await flush();
+
+    expect(runBaseline).toHaveBeenCalledWith(
+      expect.objectContaining({ repo: "https://github.com/acme/thing" }),
+      { deadlineMs: Date.parse(slaDeadline) - 60_000 },
+    );
   });
 
   it("logs and does nothing when an event carries no negotiation_id/order_id", async () => {
@@ -186,13 +261,13 @@ describe("startProviderLoop", () => {
 });
 
 describe("sweepProviderBacklog", () => {
-  let db: Database.Database;
+  let db: QuorumDb;
 
-  beforeEach(() => {
-    db = openDb(":memory:");
+  beforeEach(async () => {
+    db = await openDb(":memory:");
   });
 
-  afterEach(() => db.close());
+  afterEach(async () => closeDb(db));
 
   it("accepts a pending negotiation whose order_negotiation_created event was never seen (worker was down)", async () => {
     const client = {
@@ -230,7 +305,7 @@ describe("sweepProviderBacklog", () => {
       getOrder: vi.fn().mockResolvedValue({ status: "paid" }),
     } as unknown as AgentClient;
     const cache = new RequirementsCache(db, client);
-    cache.remember("order-paid-missed", "neg-x", { repo: "https://github.com/acme/thing", ecosystems: ["npm"], risk_policy: "balanced" });
+    await cache.remember("order-paid-missed", "neg-x", { repo: "https://github.com/acme/thing", ecosystems: ["npm"], risk_policy: "balanced" });
     const runBaseline = vi.fn().mockResolvedValue({ decision: FAKE_DECISION });
 
     await sweepProviderBacklog({ client, requirementsCache: cache, runBaseline, deliverRetryDelayMs: 1 });

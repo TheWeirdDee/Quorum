@@ -10,7 +10,7 @@ An autonomous trust broker for your software supply chain, built on the [CROO Ag
 
 [**Live site**](https://quorum-dun-alpha.vercel.app) · [**Live dashboard**](https://quorum-dun-alpha.vercel.app/dashboard) · [**Demo replay**](https://quorum-dun-alpha.vercel.app/dashboard?demo=true) · [**Hire it on the Agent Store**](https://agent.croo.network/agents/f6e61f10-a81c-4916-9791-4eab77ac2418)
 
-![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6) ![Tests](https://img.shields.io/badge/tests-208-2ea44f) ![Network](https://img.shields.io/badge/Base-mainnet-0052ff) ![Settlement](https://img.shields.io/badge/settlement-USDC%20via%20CAP-2775ca)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6) ![Tests](https://img.shields.io/badge/tests-223-2ea44f) ![Network](https://img.shields.io/badge/Base-mainnet-0052ff) ![Settlement](https://img.shields.io/badge/settlement-USDC%20via%20CAP-2775ca)
 
 <img src="docs/landing.png" alt="Quorum landing page" width="800" />
 
@@ -123,6 +123,7 @@ Building against live counterparties on real money surfaced what offline tests n
 - **A counterparty repriced 200×** ($0.10 → $20.00 within hours). Quorum's permanent answer: a **price guard** that checks the *actual* quote after order creation and before payment, refuses over-cap quotes ($0 charged), and surfaces the refusal in the decision.
 - **A provider accepted in ~6 seconds** — faster than the event waiter registered, silently dropping the confirmation. Fixed with an early-arrival buffer + a polling fallback for every wait.
 - **Events fired while the worker was down** sat pending forever. The provider loop now **sweeps for missed negotiations and paid orders** at boot and every minute.
+- **One refused lens triggered 32 replacement pairs** while the parent order timed out. Registration now has a persisted at-most-once claim, investigates only its first candidate, purchases health before trust, and stops all spending ahead of the parent SLA.
 - **Honesty is enforced, not promised**: an unresolved escalation ships the real sub-target confidence; fixture/simulated runs carry `SIMULATED` markers that can never impersonate a receipt; real spends require an explicit `--confirm-real-spend` flag on top of config.
 
 ## CAP SDK methods used (`@croo-network/sdk@0.2.1`)
@@ -139,6 +140,7 @@ Every item below was discovered against live counterparties on mainnet and is do
 
 - **The requester flow is a state machine, not three calls**: negotiate → *wait for the provider's accept* (`order_created`) → wait for a genuinely payable `created` status (24–40s of on-chain confirmation) → pay → *wait for delivery* (`order_completed`) → fetch. Each wait is bounded and event+poll raced. (items 1, 15, 16)
 - **Providers reprice at accept time** — a $0.10-listed service quoted $20.00. The actual quote is checked against a per-agent cap after order creation, before payment; over-cap quotes are refused at $0 cost. (items 22–24)
+- **A price refusal is terminal for that registration attempt** — never advance to another candidate and never buy the second lens after the first fails. The worker confirms the parent is paid before spending, applies the policy budget across all lenses, and reserves delivery headroom.
 - **The Agent Store's form wire-format differs from your schema in both directions**: requests arrive with scalars/JSON-strings where objects are declared, and deliveries must match the listing's flat schema — with **empty required values treated as missing** (`INVALID_DELIVERABLE: disagreement: missing_required`). Normalize inbound, flatten outbound, pad empties honestly. (item 28)
 - **List endpoints use different role vocabularies** (`listOrders`: buyer/provider · `listNegotiations`: requester/provider) and a server-side `status` filter that didn't match live pending negotiations — the sweep fetches pages and filters locally against SDK enums. (items 14, 28)
 - **Events fired while the worker is down are gone** — a provider must sweep `listNegotiations`/`listOrders` at boot and on an interval, or a real buyer's negotiation expires unseen. (item 28)
@@ -148,7 +150,7 @@ Every item below was discovered against live counterparties on mainnet and is do
 ```
 agent/       The autonomous agent: event detector, risk gate, CAP provider +
              requester loops, merge matrix, escalation engine, price guard,
-             SQLite store, read API, worker entrypoint. 208 tests.
+             SQLite/Neon store, read API, worker entrypoint.
 src/         The Next.js landing page + live dashboard (event feed, trust
              trajectories, disagreement panels, spend + receipts).
 schemas/     quorum.request / quorum.decision.v1 JSON Schemas — the CAP contract.
@@ -166,7 +168,7 @@ DEPLOY.md    Render (worker) + Vercel (dashboard) deployment guide.
 cd agent
 npm install
 cp ../.env.example .env      # fill in CROO_API_KEY + service IDs; keep CROO_SIMULATE=true
-npm test                     # 208 tests (a few hit the live npm registry)
+npm test                     # 223 tests (a few hit the live npm registry)
 npm run demo                 # the full disagreement→escalation story, offline, $0
 npm run worker               # the always-on provider/requester process (real SDK key required)
 ```
@@ -184,7 +186,7 @@ npm run dev                  # http://localhost:3000 — landing page
 
 ## Deployment
 
-Worker → Render (Docker, [`agent/Dockerfile`](agent/Dockerfile)), dashboard → Vercel, connected by an authenticated read-only API. Full guide with the Agent Store listing steps: [DEPLOY.md](DEPLOY.md).
+Worker → Render (Docker + Neon PostgreSQL), dashboard → Vercel, connected by an authenticated read-only API. Full guide with the Agent Store listing steps: [DEPLOY.md](DEPLOY.md).
 
 ---
 

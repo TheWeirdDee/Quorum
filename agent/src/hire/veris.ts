@@ -71,6 +71,8 @@ export interface HireVerisParams {
   simulatedRaw?: unknown;
   simulate?: boolean | undefined;
   timeouts?: { orderCreatedMs?: number; orderCompletedMs?: number } | undefined;
+  /** Optional remaining event budget; the configured per-agent cap still wins when it is lower. */
+  maxCostUsdc?: number | undefined;
   /** Defaults to env.VERIS_SERVICE_ID; overridable so callers (and tests) don't depend on .env at import time. */
   serviceId?: string | undefined;
 }
@@ -108,6 +110,6 @@ export async function hireVeris(params: HireVerisParams): Promise<HireOutcome<Tr
     simulate: params.simulate,
     simulatedDelivery: params.simulatedRaw !== undefined ? buildSimulatedDelivery(params.simulatedRaw) : undefined,
     timeouts: params.timeouts,
-    maxCostUsdc: env.VERIS_MAX_COST_USDC,
+    maxCostUsdc: Math.min(env.VERIS_MAX_COST_USDC, params.maxCostUsdc ?? Number.POSITIVE_INFINITY),
   });
 }

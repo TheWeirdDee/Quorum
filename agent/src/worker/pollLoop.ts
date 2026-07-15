@@ -1,14 +1,14 @@
 import type { AgentClient } from "@croo-network/sdk";
-import type Database from "better-sqlite3";
 import { env } from "../config/env.js";
 import { logger } from "../config/logger.js";
 import type { OrderEventCorrelator } from "../croo/orderCorrelator.js";
 import { pollRepoForNewEvents } from "../detector/index.js";
 import { processEvent } from "../orchestrate/processEvent.js";
+import type { QuorumDb } from "../store/db.js";
 import { listRepos } from "../store/repos.js";
 
 export interface PollOnceParams {
-  db: Database.Database;
+  db: QuorumDb;
   client: AgentClient;
   correlator: OrderEventCorrelator;
   simulate?: boolean | undefined;
@@ -24,7 +24,7 @@ export interface PollOnceParams {
  */
 export async function pollOnce(params: PollOnceParams): Promise<void> {
   const { db, client, correlator, simulate } = params;
-  const repos = listRepos(db);
+  const repos = await listRepos(db);
   logger.info(`pollOnce: sweeping ${repos.length} registered repo(s)`);
 
   for (const repo of repos) {

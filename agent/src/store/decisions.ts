@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { QuorumDb } from "./db.js";
 
 export interface DecisionRecord {
   id: number;
@@ -20,34 +20,26 @@ export interface InsertDecisionInput {
 }
 
 /** Persists a quorum.decision.v1 payload. Built for later milestones (Risk Gate / merge); unused by the Event Detector. */
-export function insertDecision(db: Database.Database, input: InsertDecisionInput): DecisionRecord {
-  const result = db
-    .prepare(
-      `INSERT INTO decisions (event_id, payload_json, decision, confidence, total_spend_usdc, decided_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      input.eventId ?? null,
-      JSON.stringify(input.payload),
-      input.decision,
-      input.confidence,
-      input.totalSpendUsdc,
-      input.decidedAt,
-    );
+export async function insertDecision(db: QuorumDb, input: InsertDecisionInput): Promise<DecisionRecord> {
+  const [created] = await db<DecisionRecord>("decisions")
+    .insert({
+      event_id: input.eventId ?? null,
+      payload_json: JSON.stringify(input.payload),
+      decision: input.decision,
+      confidence: input.confidence,
+      total_spend_usdc: input.totalSpendUsdc,
+      decided_at: input.decidedAt,
+    })
+    .returning("*");
 
-  const created = db
-    .prepare(`SELECT * FROM decisions WHERE id = ?`)
-    .get(Number(result.lastInsertRowid)) as DecisionRecord | undefined;
   if (!created) throw new Error("Failed to read back decision after insert");
   return created;
 }
 
 /** Most recent decisions first, for the dashboard's event feed (direct local read, or via the read API — see src/api/server.ts). */
-export function listRecentDecisions(db: Database.Database, limit = 50): DecisionRecord[] {
-  return db
-    .prepare(
-      `SELECT id, event_id, payload_json, decision, confidence, total_spend_usdc, decided_at
-       FROM decisions ORDER BY id DESC LIMIT ?`,
-    )
-    .all(limit) as DecisionRecord[];
+export async function listRecentDecisions(db: QuorumDb, limit = 50): Promise<DecisionRecord[]> {
+  return db<DecisionRecord>("decisions")
+    .select("id", "event_id", "payload_json", "decision", "confidence", "total_spend_usdc", "decided_at")
+    .orderBy("id", "desc")
+    .limit(limit);
 }

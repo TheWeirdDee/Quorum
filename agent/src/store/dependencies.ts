@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { QuorumDb } from "./db.js";
 
 export interface DependencyRecord {
   id: number;
@@ -24,52 +24,48 @@ export interface UpsertDependencyInput {
 }
 
 /** Inserts a dependency for a repo, or returns the existing record. */
-export function upsertDependency(db: Database.Database, input: UpsertDependencyInput): DependencyRecord {
+export async function upsertDependency(db: QuorumDb, input: UpsertDependencyInput): Promise<DependencyRecord> {
   const ecosystem = input.ecosystem ?? "npm";
-  const existing = getDependency(db, input.repoId, input.name, ecosystem);
+  const existing = await getDependency(db, input.repoId, input.name, ecosystem);
   if (existing) return existing;
 
-  const result = db
-    .prepare(
-      `INSERT INTO dependencies (repo_id, name, version, ecosystem, is_production, github_repo_url, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      input.repoId,
-      input.name,
-      input.version ?? null,
+  await db("dependencies")
+    .insert({
+      repo_id: input.repoId,
+      name: input.name,
+      version: input.version ?? null,
       ecosystem,
-      input.isProduction === false ? 0 : 1,
-      input.githubRepoUrl ?? null,
-      new Date().toISOString(),
-    );
+      is_production: input.isProduction === false ? 0 : 1,
+      github_repo_url: input.githubRepoUrl ?? null,
+      created_at: new Date().toISOString(),
+    })
+    .onConflict(["repo_id", "name", "ecosystem"])
+    .ignore();
 
-  const created = getDependencyById(db, Number(result.lastInsertRowid));
+  const created = await getDependency(db, input.repoId, input.name, ecosystem);
   if (!created) throw new Error(`Failed to read back dependency ${input.name} after insert`);
   return created;
 }
 
-export function getDependency(
-  db: Database.Database,
+export async function getDependency(
+  db: QuorumDb,
   repoId: number,
   name: string,
   ecosystem = "npm",
-): DependencyRecord | undefined {
-  return db
-    .prepare(`SELECT * FROM dependencies WHERE repo_id = ? AND name = ? AND ecosystem = ?`)
-    .get(repoId, name, ecosystem) as DependencyRecord | undefined;
+): Promise<DependencyRecord | undefined> {
+  return db<DependencyRecord>("dependencies").where({ repo_id: repoId, name, ecosystem }).first();
 }
 
-export function getDependencyById(db: Database.Database, id: number): DependencyRecord | undefined {
-  return db.prepare(`SELECT * FROM dependencies WHERE id = ?`).get(id) as DependencyRecord | undefined;
+export async function getDependencyById(db: QuorumDb, id: number): Promise<DependencyRecord | undefined> {
+  return db<DependencyRecord>("dependencies").where({ id }).first();
 }
 
-export function listDependenciesForRepo(db: Database.Database, repoId: number): DependencyRecord[] {
-  return db.prepare(`SELECT * FROM dependencies WHERE repo_id = ?`).all(repoId) as DependencyRecord[];
+export async function listDependenciesForRepo(db: QuorumDb, repoId: number): Promise<DependencyRecord[]> {
+  return db<DependencyRecord>("dependencies").where({ repo_id: repoId });
 }
 
 /** Cheaper than listDependenciesForRepo(...).length for the dashboard's per-repo count — avoids materializing every row. */
-export function countDependenciesForRepo(db: Database.Database, repoId: number): number {
-  const row = db.prepare(`SELECT COUNT(*) as n FROM dependencies WHERE repo_id = ?`).get(repoId) as { n: number };
-  return row.n;
+export async function countDependenciesForRepo(db: QuorumDb, repoId: number): Promise<number> {
+  const row = await db("dependencies").where({ repo_id: repoId }).count<{ n: string | number }>("id as n").first();
+  return Number(row?.n ?? 0);
 }

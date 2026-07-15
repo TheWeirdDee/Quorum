@@ -240,7 +240,7 @@ describe("investigate — new_cve, balanced policy: agreement -> DO_NOT_SHIP, no
 });
 
 describe("investigate — degrades gracefully on a lens failure, never fabricates a decision (FR-13)", () => {
-  it("returns ok:false when the health hire fails, carrying the trust lens that DID succeed", async () => {
+  it("fails fast when health fails and does not purchase the now-useless trust lens", async () => {
     const correlator = new OrderEventCorrelator(fakeStream());
     const result = await investigate({
       event: maliciousEvent,
@@ -257,14 +257,15 @@ describe("investigate — degrades gracefully on a lens failure, never fabricate
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.failedLenses).toEqual(["health"]);
-      expect(result.partialLenses.trust?.verdict).toBe("high_risk");
+      expect(result.partialLenses.trust).toBeUndefined();
       expect(result.partialLenses.health).toBeUndefined();
       expect(result.reason).toContain("health");
       expect(result.reason).toContain("Repo Doctor");
+      expect(result.reason).toContain("VERIS) not purchased");
     }
   });
 
-  it("returns ok:false with both lenses failed when neither simulate fixture is supplied", async () => {
+  it("does not attempt trust when the first lens has no fixture", async () => {
     const correlator = new OrderEventCorrelator(fakeStream());
     const result = await investigate({
       event: maliciousEvent,
@@ -278,7 +279,7 @@ describe("investigate — degrades gracefully on a lens failure, never fabricate
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.failedLenses).toEqual(["health", "trust"]);
+      expect(result.failedLenses).toEqual(["health"]);
       expect(result.partialLenses.health).toBeUndefined();
       expect(result.partialLenses.trust).toBeUndefined();
     }

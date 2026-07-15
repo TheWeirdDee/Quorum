@@ -6,6 +6,7 @@ import {
   type AgentClient,
   type Event,
   type EventStream,
+  type Order,
 } from "@croo-network/sdk";
 import { logger } from "../config/logger.js";
 import { pollUntil } from "../croo/pollFallback.js";
@@ -18,7 +19,10 @@ export interface ProviderLoopParams {
   stream: EventStream;
   requirementsCache: RequirementsCache;
   /** Runs the baseline scan for an accepted+paid registration. Injectable so tests can exercise the negotiation/order lifecycle without the full investigate() pipeline; production callers pass `runBaselineScan` bound to db/client/correlator. */
-  runBaseline: (request: QuorumRequest) => Promise<{ decision: QuorumDecision }>;
+  runBaseline: (
+    request: QuorumRequest,
+    context?: { deadlineMs?: number | undefined },
+  ) => Promise<{ decision: QuorumDecision }>;
   /** Pause before the single delivery retry; tests pass ~0 so they don't sleep. */
   deliverRetryDelayMs?: number;
 }
@@ -50,11 +54,13 @@ export function toWireDeliverable(decision: QuorumDecision): Record<string, unkn
   };
 }
 
-async function safeRejectOrder(client: AgentClient, orderId: string, reason: string): Promise<void> {
+async function safeRejectOrder(client: AgentClient, orderId: string, reason: string): Promise<boolean> {
   try {
     await client.rejectOrder(orderId, reason);
+    return true;
   } catch (err) {
     logger.error(`providerLoop: rejectOrder(${orderId}) also failed:`, err);
+    return false;
   }
 }
 
@@ -66,6 +72,33 @@ async function safeRejectOrder(client: AgentClient, orderId: string, reason: str
  */
 const inFlightNegotiations = new Set<string>();
 const inFlightOrders = new Set<string>();
+const DELIVERY_HEADROOM_MS = 60_000;
+const PAID_STATUS_WAIT_MS = 60_000;
+
+const TERMINAL_BEFORE_PAID = new Set<string>([
+  OrderStatus.Completed,
+  OrderStatus.Rejected,
+  OrderStatus.Expired,
+  OrderStatus.CreateFailed,
+  OrderStatus.PayFailed,
+]);
+
+async function waitForPaidOrder(client: AgentClient, orderId: string): Promise<Order> {
+  const first = await client.getOrder(orderId);
+  if (first.status === OrderStatus.Paid) return first;
+  if (TERMINAL_BEFORE_PAID.has(first.status)) {
+    throw new Error(`order ${orderId} reached terminal status "${first.status}" before baseline spending began`);
+  }
+  return pollUntil({
+    poll: async () => {
+      const order = await client.getOrder(orderId);
+      return order.status === OrderStatus.Paid ? order : undefined;
+    },
+    timeoutMs: PAID_STATUS_WAIT_MS,
+    pollIntervalMs: 3_000,
+    timeoutMessage: `order ${orderId} did not reach 'paid' status within 60s`,
+  });
+}
 
 async function handleNegotiationCreated(client: AgentClient, cache: RequirementsCache, event: Event): Promise<void> {
   const negotiationId = event.negotiation_id;
@@ -105,7 +138,7 @@ async function processNegotiation(client: AgentClient, cache: RequirementsCache,
 
   try {
     const accepted = await client.acceptNegotiation(negotiationId);
-    cache.remember(accepted.order.orderId, negotiationId, parsed.request);
+    await cache.remember(accepted.order.orderId, negotiationId, parsed.request);
     logger.info(`providerLoop: accepted negotiation ${negotiationId} -> order ${accepted.order.orderId} (repo=${parsed.request.repo})`);
   } catch (err) {
     logger.error(`providerLoop: acceptNegotiation(${negotiationId}) failed — buyer's funds were never locked, nothing to release:`, err);
@@ -147,44 +180,74 @@ async function processPaidOrder(
     return;
   }
 
-  let decision: QuorumDecision;
-  try {
-    ({ decision } = await runBaseline(request));
-  } catch (err) {
-    logger.error(`providerLoop: baseline scan failed for order ${orderId}:`, err);
-    await safeRejectOrder(client, orderId, "internal error running the baseline scan");
+  if (!(await cache.claimForProcessing(orderId))) {
+    logger.info(`providerLoop: order ${orderId} already claimed or finalized locally; skipping replay`);
     return;
   }
 
-  // The order_paid signal can precede the order actually settling into
-  // 'paid' (the same async chain-confirmation gap the requester side
-  // measured at 24-40s for creating->created). Delivering into the wrong
-  // status errors, so wait for 'paid' first — and if the wait itself times
-  // out, still attempt delivery rather than throwing away a finished scan.
+  let paidOrder: Order;
   try {
-    await pollUntil({
-      poll: async () => ((await client.getOrder(orderId)).status === OrderStatus.Paid ? (true as const) : undefined),
-      timeoutMs: 60_000,
-      pollIntervalMs: 3_000,
-      timeoutMessage: `order ${orderId} did not reach 'paid' status within 60s`,
-    });
+    paidOrder = await waitForPaidOrder(client, orderId);
   } catch (err) {
-    logger.warn(`providerLoop: proceeding to deliver ${orderId} despite the paid-status wait failing:`, err);
+    logger.error(`providerLoop: refusing to spend for order ${orderId} because paid status was not confirmed:`, err);
+    const rejected = await safeRejectOrder(client, orderId, "parent order was not confirmed paid before baseline processing");
+    await cache.markStatus(orderId, rejected ? "rejected" : "failed");
+    return;
+  }
+
+  const slaDeadlineMs = Date.parse(paidOrder.slaDeadline);
+  const spendingDeadlineMs = Number.isFinite(slaDeadlineMs) ? slaDeadlineMs - DELIVERY_HEADROOM_MS : undefined;
+  if (spendingDeadlineMs !== undefined && spendingDeadlineMs <= Date.now()) {
+    logger.warn(`providerLoop: order ${orderId} has insufficient SLA time remaining; rejecting without outbound spend`);
+    const rejected = await safeRejectOrder(client, orderId, "insufficient SLA time remaining to run the baseline safely");
+    await cache.markStatus(orderId, rejected ? "rejected" : "failed");
+    return;
+  }
+
+  let decision: QuorumDecision;
+  try {
+    ({ decision } =
+      spendingDeadlineMs === undefined
+        ? await runBaseline(request)
+        : await runBaseline(request, { deadlineMs: spendingDeadlineMs }));
+  } catch (err) {
+    logger.error(`providerLoop: baseline scan failed for order ${orderId}:`, err);
+    const rejected = await safeRejectOrder(client, orderId, "internal error running the baseline scan");
+    await cache.markStatus(orderId, rejected ? "rejected" : "failed");
+    return;
+  }
+
+  // Re-check after the scan: the parent can expire while external work runs.
+  // Never attempt delivery into a terminal/non-paid status.
+  try {
+    const current = await client.getOrder(orderId);
+    if (current.status !== OrderStatus.Paid) {
+      logger.warn(`providerLoop: order ${orderId} became "${current.status}" before delivery; stopping`);
+      await cache.markStatus(orderId, current.status);
+      return;
+    }
+  } catch (err) {
+    logger.error(`providerLoop: final status check failed for ${orderId}; refusing an unsafe delivery attempt:`, err);
+    await cache.markStatus(orderId, "failed");
+    return;
   }
 
   const deliverable = { deliverableType: DeliverableType.Schema, deliverableSchema: JSON.stringify(toWireDeliverable(decision)) };
   try {
     await client.deliverOrder(orderId, deliverable);
+    await cache.markStatus(orderId, "delivered");
     logger.info(`providerLoop: delivered order ${orderId} (repo=${request.repo}, decision=${decision.decision})`);
   } catch (err) {
     logger.error(`providerLoop: deliverOrder(${orderId}) failed — retrying once in ${deliverRetryDelayMs}ms:`, err);
     await new Promise((resolve) => setTimeout(resolve, deliverRetryDelayMs));
     try {
       await client.deliverOrder(orderId, deliverable);
+      await cache.markStatus(orderId, "delivered");
       logger.info(`providerLoop: delivered order ${orderId} on retry (repo=${request.repo}, decision=${decision.decision})`);
     } catch (retryErr) {
       logger.error(`providerLoop: deliverOrder(${orderId}) retry also failed — rejecting to release escrow:`, retryErr);
-      await safeRejectOrder(client, orderId, "internal error delivering the decision");
+      const rejected = await safeRejectOrder(client, orderId, "internal error delivering the decision");
+      await cache.markStatus(orderId, rejected ? "rejected" : "failed");
     }
   }
 }

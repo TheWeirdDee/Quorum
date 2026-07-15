@@ -1,5 +1,4 @@
 import type { AgentClient } from "@croo-network/sdk";
-import type Database from "better-sqlite3";
 import { env } from "../config/env.js";
 import { logger } from "../config/logger.js";
 import { getRiskPolicy } from "../config/riskPolicy.js";
@@ -12,13 +11,14 @@ import { packageNameFromDependency, type TrustEvent } from "../detector/types.js
 import { riskGate } from "../gate/riskGate.js";
 import { notifySlack } from "../notify/slack.js";
 import { insertDecision } from "../store/decisions.js";
+import type { QuorumDb } from "../store/db.js";
 import { insertOrder } from "../store/orders.js";
 import type { RepoRecord } from "../store/repos.js";
 import { getSeenEventId } from "../store/seenEvents.js";
 import { investigate, toDecisionEvent } from "./investigate.js";
 
 export interface ProcessEventParams {
-  db: Database.Database;
+  db: QuorumDb;
   client: AgentClient;
   correlator: OrderEventCorrelator;
   repo: RepoRecord;
@@ -27,6 +27,8 @@ export interface ProcessEventParams {
   simulatedHealthRaw?: unknown;
   simulatedTrustRaw?: unknown;
   simulatedEscalationRaw?: unknown;
+  timeouts?: { orderCreatedMs?: number; orderCompletedMs?: number } | undefined;
+  deadlineMs?: number | undefined;
 }
 
 export type ProcessEventResult = { ok: true; decision: QuorumDecision } | { ok: false; reason: string };
@@ -38,38 +40,40 @@ export type ProcessEventResult = { ok: true; decision: QuorumDecision } | { ok: 
  * produced (and possibly already delivered/notified) and must not be lost
  * from the caller's perspective just because the write failed.
  */
-export function persistDecisionAndOrders(db: Database.Database, event: TrustEvent | undefined, decision: QuorumDecision): void {
+export async function persistDecisionAndOrders(db: QuorumDb, event: TrustEvent | undefined, decision: QuorumDecision): Promise<void> {
   try {
-    const eventId = event ? getSeenEventId(db, event) : undefined;
-    const record = insertDecision(db, {
-      ...(eventId !== undefined ? { eventId } : {}),
-      payload: decision,
-      decision: decision.decision,
-      confidence: decision.confidence,
-      totalSpendUsdc: decision.total_spend_usdc,
-      decidedAt: decision.decided_at,
-    });
-
-    const legs = [
-      decision.lenses.health && { ...decision.lenses.health },
-      decision.lenses.trust && { ...decision.lenses.trust },
-      decision.escalation.triggered && decision.escalation.order_id
-        ? { agent: decision.escalation.agent, order_id: decision.escalation.order_id, tx: decision.escalation.tx, cost_usdc: decision.escalation.cost_usdc }
-        : undefined,
-    ];
-
-    for (const leg of legs) {
-      if (!leg?.order_id) continue;
-      insertOrder(db, {
-        direction: "outbound",
-        orderId: leg.order_id,
-        decisionId: record.id,
-        status: "completed",
-        ...(leg.agent !== undefined ? { counterparty: leg.agent } : {}),
-        ...(leg.cost_usdc !== undefined ? { costUsdc: leg.cost_usdc } : {}),
-        ...(leg.tx !== undefined ? { tx: leg.tx } : {}),
+    await db.transaction(async (trx) => {
+      const eventId = event ? await getSeenEventId(trx, event) : undefined;
+      const record = await insertDecision(trx, {
+        ...(eventId !== undefined ? { eventId } : {}),
+        payload: decision,
+        decision: decision.decision,
+        confidence: decision.confidence,
+        totalSpendUsdc: decision.total_spend_usdc,
+        decidedAt: decision.decided_at,
       });
-    }
+
+      const legs = [
+        decision.lenses.health && { ...decision.lenses.health },
+        decision.lenses.trust && { ...decision.lenses.trust },
+        decision.escalation.triggered && decision.escalation.order_id
+          ? { agent: decision.escalation.agent, order_id: decision.escalation.order_id, tx: decision.escalation.tx, cost_usdc: decision.escalation.cost_usdc }
+          : undefined,
+      ];
+
+      for (const leg of legs) {
+        if (!leg?.order_id) continue;
+        await insertOrder(trx, {
+          direction: "outbound",
+          orderId: leg.order_id,
+          decisionId: record.id,
+          status: "completed",
+          ...(leg.agent !== undefined ? { counterparty: leg.agent } : {}),
+          ...(leg.cost_usdc !== undefined ? { costUsdc: leg.cost_usdc } : {}),
+          ...(leg.tx !== undefined ? { tx: leg.tx } : {}),
+        });
+      }
+    });
   } catch (err) {
     logger.error("persistDecisionAndOrders: storage failed (decision itself was already produced):", err);
   }
@@ -99,7 +103,7 @@ export async function processEvent(params: ProcessEventParams): Promise<ProcessE
       event: toDecisionEvent(event),
       gateReason: gateResult.reason,
     });
-    persistDecisionAndOrders(db, event, decision);
+    await persistDecisionAndOrders(db, event, decision);
     if (repo.notify_type !== "none") await notifySlack(decision, repo.notify_webhook ?? undefined);
     return { ok: true, decision };
   }
@@ -127,13 +131,15 @@ export async function processEvent(params: ProcessEventParams): Promise<ProcessE
     simulatedTrustRaw: params.simulatedTrustRaw,
     simulatedEscalationRaw: params.simulatedEscalationRaw,
     escalationServiceId: env.ESCALATION_AGENT_SERVICE_ID || undefined,
+    timeouts: params.timeouts,
+    deadlineMs: params.deadlineMs,
   });
 
   if (!result.ok) {
     return { ok: false, reason: result.reason };
   }
 
-  persistDecisionAndOrders(db, event, result.decision);
+  await persistDecisionAndOrders(db, event, result.decision);
   if (repo.notify_type !== "none") await notifySlack(result.decision, repo.notify_webhook ?? undefined);
   return { ok: true, decision: result.decision };
 }

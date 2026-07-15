@@ -1,5 +1,4 @@
 import type { AgentClient } from "@croo-network/sdk";
-import type Database from "better-sqlite3";
 import { env } from "../config/env.js";
 import { logger } from "../config/logger.js";
 import { getRiskPolicy } from "../config/riskPolicy.js";
@@ -12,11 +11,12 @@ import { riskGate } from "../gate/riskGate.js";
 import { notifySlack } from "../notify/slack.js";
 import { persistDecisionAndOrders, processEvent } from "../orchestrate/processEvent.js";
 import { upsertDependency } from "../store/dependencies.js";
+import type { QuorumDb } from "../store/db.js";
 import { upsertRepo, type RepoRecord } from "../store/repos.js";
 import type { QuorumRequest } from "./requestSchema.js";
 
 export interface RunBaselineScanParams {
-  db: Database.Database;
+  db: QuorumDb;
   client: AgentClient;
   correlator: OrderEventCorrelator;
   request: QuorumRequest;
@@ -24,6 +24,8 @@ export interface RunBaselineScanParams {
   simulatedHealthRaw?: unknown;
   simulatedTrustRaw?: unknown;
   simulatedEscalationRaw?: unknown;
+  /** Spending must stop by this time; the provider reserves delivery headroom separately. */
+  deadlineMs?: number | undefined;
 }
 
 export interface BaselineScanResult {
@@ -47,6 +49,26 @@ function resolveNotify(request: QuorumRequest): { notifyType: string; notifyWebh
   return { notifyType: "slack", notifyWebhook: request.notify?.webhook ?? (env.SLACK_WEBHOOK_URL || undefined) };
 }
 
+const MIN_BASELINE_HIRE_WINDOW_MS = 30_000;
+const BASELINE_HIRE_WAIT_STAGES = 4;
+
+/**
+ * Splits the remaining spending window across create + complete for two
+ * sequential lenses. Undefined means there is not enough time to start.
+ */
+export function baselineHireTimeouts(
+  deadlineMs: number,
+  nowMs: number = Date.now(),
+): { orderCreatedMs: number; orderCompletedMs: number } | undefined {
+  const remainingMs = deadlineMs - nowMs;
+  if (remainingMs < MIN_BASELINE_HIRE_WINDOW_MS) return undefined;
+  const perStageMs = Math.max(1, Math.floor(remainingMs / BASELINE_HIRE_WAIT_STAGES));
+  return {
+    orderCreatedMs: Math.min(env.CROO_ORDER_CREATED_TIMEOUT_MS, perStageMs),
+    orderCompletedMs: Math.min(env.CROO_ORDER_COMPLETED_TIMEOUT_MS, perStageMs),
+  };
+}
+
 /**
  * FR-4: on order_paid, register the repo, index its npm dependencies
  * (PRD N2 — only npm runs the full pipeline; other requested ecosystems are
@@ -55,9 +77,10 @@ function resolveNotify(request: QuorumRequest): { notifyType: string; notifyWebh
  * decision for the first admitted event the Risk Gate says is worth paying
  * for, or an honest "nothing to report yet" baseline decision.
  *
- * Only ONE candidate event is investigated here even if several are found
- * at registration (real CAP spend for each would be surprising on a single
- * register call) — whichever succeeds first; any others are left admitted
+ * Only the FIRST candidate event is investigated here even if several are
+ * found at registration (real CAP spend for each would be surprising on a
+ * single register call). A failure never advances to another candidate;
+ * any others are left admitted
  * in `seen_events` un-investigated is NOT what happens: they were already
  * marked seen by pollRepoForNewEvents before this function chooses among
  * them (see the poll-loop-reuse note below), so a failed/skipped candidate
@@ -71,7 +94,7 @@ export async function runBaselineScan(params: RunBaselineScanParams): Promise<Ba
   const { db, request } = params;
   const { notifyType, notifyWebhook } = resolveNotify(request);
 
-  const repo = upsertRepo(db, {
+  const repo = await upsertRepo(db, {
     githubUrl: request.repo,
     riskPolicy: request.risk_policy,
     notifyType,
@@ -89,7 +112,7 @@ export async function runBaselineScan(params: RunBaselineScanParams): Promise<Ba
     });
     if (deps) {
       for (const dep of deps) {
-        upsertDependency(db, { repoId: repo.id, name: dep.name, version: dep.version, isProduction: dep.isProduction });
+        await upsertDependency(db, { repoId: repo.id, name: dep.name, version: dep.version, isProduction: dep.isProduction });
       }
       dependencyCount = deps.length;
     } else {
@@ -111,8 +134,14 @@ export async function runBaselineScan(params: RunBaselineScanParams): Promise<Ba
   );
   const investigable = admitted.filter((event) => riskGate(event, policy).investigated);
 
-  for (const event of investigable) {
+  const event = investigable[0];
+  let degradationReason = "";
+  if (event) {
     try {
+      const timeouts = params.deadlineMs === undefined ? undefined : baselineHireTimeouts(params.deadlineMs);
+      if (params.deadlineMs !== undefined && !timeouts) {
+        throw new Error("registration SLA spending window was too short to start an investigation safely");
+      }
       const result = await processEvent({
         db,
         client: params.client,
@@ -123,17 +152,22 @@ export async function runBaselineScan(params: RunBaselineScanParams): Promise<Ba
         simulatedHealthRaw: params.simulatedHealthRaw,
         simulatedTrustRaw: params.simulatedTrustRaw,
         simulatedEscalationRaw: params.simulatedEscalationRaw,
+        timeouts,
+        deadlineMs: params.deadlineMs,
       });
       if (result.ok) {
         return { decision: result.decision, repo, dependencyCount };
       }
-      logger.warn(`runBaselineScan: ${event.dependency} degraded at registration (${result.reason}) — trying the next candidate, if any`);
+      degradationReason = result.reason;
+      logger.warn(`runBaselineScan: ${event.dependency} degraded at registration (${result.reason}); no additional candidate will be purchased`);
     } catch (err) {
-      logger.warn(`runBaselineScan: ${event.dependency} threw at registration — trying the next candidate, if any:`, err);
+      degradationReason = err instanceof Error ? err.message : String(err);
+      logger.warn(`runBaselineScan: ${event.dependency} threw at registration; no additional candidate will be purchased:`, err);
     }
   }
 
-  const degradedCount = investigable.length;
+  const degradedCount = event ? 1 : 0;
+  const candidateCount = investigable.length;
   const decision = serializeDecision({
     investigated: false,
     dependency: `${repoSlug(request.repo)}@registration`,
@@ -142,7 +176,7 @@ export async function runBaselineScan(params: RunBaselineScanParams): Promise<Ba
       detail:
         `Registered ${request.repo}; indexed ${dependencyCount} npm dependencies.` +
         (degradedCount > 0
-          ? ` ${degradedCount} candidate event(s) found but could not be independently verified at registration.`
+          ? ` ${candidateCount} candidate event(s) found; the first could not be independently verified (${degradationReason}). No additional candidates were purchased.`
           : " No investigatable trust events found."),
       source: "system",
       ref: request.repo,
@@ -150,11 +184,11 @@ export async function runBaselineScan(params: RunBaselineScanParams): Promise<Ba
     },
     gateReason:
       degradedCount > 0
-        ? "candidate event(s) found but verification failed at registration"
+        ? "first candidate verification failed; registration single-attempt spending guard stopped"
         : "no investigatable trust events at registration",
   });
 
-  persistDecisionAndOrders(db, undefined, decision);
+  await persistDecisionAndOrders(db, undefined, decision);
   if (notifyType !== "none") await notifySlack(decision, notifyWebhook);
   return { decision, repo, dependencyCount };
 }

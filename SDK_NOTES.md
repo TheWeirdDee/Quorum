@@ -937,6 +937,23 @@ failure past acceptance calls `rejectOrder` to release escrow, per spec.
 negotiation/order lifecycle is unit-testable without the full investigate()
 pipeline.
 
+**July 15 production incident — bounded registration spending**: one paid
+registration discovered many investigable events. Repo Doctor repriced to
+$0.10, above its $0.05 cap, so its price guard correctly refused payment.
+The registration loop nevertheless advanced to the next event and purchased
+VERIS again. It created 32 lens pairs, completed six $0.10 VERIS orders,
+drained the requester wallet, and then hit ERC-4337
+`Paymaster: postOp token transfer failed` while the parent exceeded its SLA.
+
+Permanent controls: the parent must be confirmed `paid` before outbound
+work; an inbound order atomically claims a persisted `processing` state;
+only the first registration candidate is attempted; Repo Doctor completes
+before VERIS can be purchased; remaining policy budget caps each later
+quote; all waits shrink to the remaining parent SLA; one minute is reserved
+for delivery; and terminal parent status prevents delivery/replay. A crash
+while `processing` intentionally fails closed and lets CAP refund rather
+than reclaiming the job and risking duplicate spend.
+
 **`src/worker/pollLoop.ts`** (`pollOnce` / `startPollLoop`) — the
 "register -> index deps -> POLL LOOP -> sleep" continuous loop from PRD §8
 that also didn't exist; `detectTrustEvents`/`pollRepoForNewEvents` were

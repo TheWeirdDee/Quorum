@@ -24,6 +24,8 @@
     "@croo-network/sdk": "^0.2.1",
     "better-sqlite3": "^11.10.0",
     "dotenv": "^16.4.5",
+    "knex": "^3.3.0",
+    "pg": "^8.22.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {

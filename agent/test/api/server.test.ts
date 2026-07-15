@@ -1,8 +1,7 @@
 import type { AddressInfo } from "node:net";
-import type Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { startReadApi } from "../../src/api/server.js";
-import { openDb } from "../../src/store/db.js";
+import { closeDb, openDb, type QuorumDb } from "../../src/store/db.js";
 import { insertDecision } from "../../src/store/decisions.js";
 import { upsertDependency } from "../../src/store/dependencies.js";
 import { upsertRepo } from "../../src/store/repos.js";
@@ -10,12 +9,12 @@ import { upsertRepo } from "../../src/store/repos.js";
 const API_KEY = "test-secret-key";
 
 describe("read API server", () => {
-  let db: Database.Database;
+  let db: QuorumDb;
   let server: ReturnType<typeof startReadApi>;
   let baseUrl: string;
 
   beforeEach(async () => {
-    db = openDb(":memory:");
+    db = await openDb(":memory:");
     server = startReadApi(db, 0, API_KEY);
     await new Promise<void>((resolve) => server.once("listening", resolve));
     const { port } = server.address() as AddressInfo;
@@ -24,7 +23,7 @@ describe("read API server", () => {
 
   afterEach(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    db.close();
+    await closeDb(db);
   });
 
   it("returns 401 with no Authorization header", async () => {
@@ -49,7 +48,7 @@ describe("read API server", () => {
   });
 
   it("GET /decisions returns the same shape the dashboard's local read produces", async () => {
-    insertDecision(db, {
+    await insertDecision(db, {
       payload: { schema: "quorum.decision.v1", dependency: "left-pad@1.3.1", decision: "SHIP" },
       decision: "SHIP",
       confidence: 0.95,
@@ -71,7 +70,7 @@ describe("read API server", () => {
 
   it("GET /decisions respects the limit query param, capped at 200", async () => {
     for (let i = 0; i < 3; i++) {
-      insertDecision(db, {
+      await insertDecision(db, {
         payload: { schema: "quorum.decision.v1", dependency: `pkg${i}@1.0.0` },
         decision: "ARCHIVED_NO_ACTION",
         confidence: 1,
@@ -86,9 +85,9 @@ describe("read API server", () => {
   });
 
   it("GET /repos includes a per-repo dependency count", async () => {
-    const repo = upsertRepo(db, { githubUrl: "https://github.com/acme/thing", riskPolicy: "balanced" });
-    upsertDependency(db, { repoId: repo.id, name: "left-pad" });
-    upsertDependency(db, { repoId: repo.id, name: "express" });
+    const repo = await upsertRepo(db, { githubUrl: "https://github.com/acme/thing", riskPolicy: "balanced" });
+    await upsertDependency(db, { repoId: repo.id, name: "left-pad" });
+    await upsertDependency(db, { repoId: repo.id, name: "express" });
 
     const res = await fetch(`${baseUrl}/repos`, { headers: { authorization: `Bearer ${API_KEY}` } });
     expect(res.status).toBe(200);

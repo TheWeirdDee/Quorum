@@ -1,19 +1,21 @@
-import type Database from "better-sqlite3";
 import type { TrustEvent } from "../detector/types.js";
+import type { QuorumDb } from "./db.js";
 
 /** True if this (dependency, type, ref) triple has already fired the pipeline. */
-export function hasSeen(db: Database.Database, event: Pick<TrustEvent, "dependency" | "type" | "ref">): boolean {
-  const row = db
-    .prepare(`SELECT 1 FROM seen_events WHERE dependency = ? AND type = ? AND ref = ?`)
-    .get(event.dependency, event.type, event.ref);
+export async function hasSeen(db: QuorumDb, event: Pick<TrustEvent, "dependency" | "type" | "ref">): Promise<boolean> {
+  const row = await db("seen_events")
+    .select("id")
+    .where({ dependency: event.dependency, type: event.type, ref: event.ref })
+    .first();
   return row !== undefined;
 }
 
 /** The seen_events row id for this (dependency, type, ref) triple, so a decision can be linked back to it — undefined if it was never recorded (e.g. a synthetic M5 baseline event). */
-export function getSeenEventId(db: Database.Database, event: Pick<TrustEvent, "dependency" | "type" | "ref">): number | undefined {
-  const row = db
-    .prepare(`SELECT id FROM seen_events WHERE dependency = ? AND type = ? AND ref = ?`)
-    .get(event.dependency, event.type, event.ref) as { id: number } | undefined;
+export async function getSeenEventId(db: QuorumDb, event: Pick<TrustEvent, "dependency" | "type" | "ref">): Promise<number | undefined> {
+  const row = (await db("seen_events")
+    .select("id")
+    .where({ dependency: event.dependency, type: event.type, ref: event.ref })
+    .first()) as { id: number } | undefined;
   return row?.id;
 }
 
@@ -21,26 +23,25 @@ export function getSeenEventId(db: Database.Database, event: Pick<TrustEvent, "d
  * Records an event as seen. Idempotent: if the (dependency, type, ref) triple
  * is already recorded, this is a no-op (first-seen wins).
  */
-export function recordSeen(
-  db: Database.Database,
+export async function recordSeen(
+  db: QuorumDb,
   event: TrustEvent,
   repoId: number | null = null,
-): void {
-  db.prepare(
-    `INSERT OR IGNORE INTO seen_events
-      (repo_id, dependency, type, ref, severity_hint, source, observed_at, context_json, first_seen_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    repoId,
-    event.dependency,
-    event.type,
-    event.ref,
-    event.severity_hint,
-    event.source,
-    event.observed_at,
-    event.context ? JSON.stringify(event.context) : null,
-    new Date().toISOString(),
-  );
+): Promise<void> {
+  await db("seen_events")
+    .insert({
+      repo_id: repoId,
+      dependency: event.dependency,
+      type: event.type,
+      ref: event.ref,
+      severity_hint: event.severity_hint,
+      source: event.source,
+      observed_at: event.observed_at,
+      context_json: event.context ? JSON.stringify(event.context) : null,
+      first_seen_at: new Date().toISOString(),
+    })
+    .onConflict(["dependency", "type", "ref"])
+    .ignore();
 }
 
 /**
@@ -48,15 +49,15 @@ export function recordSeen(
  * as seen in the same pass. Events are processed in order; duplicates within
  * the same batch are also collapsed.
  */
-export function admitNewEvents(
-  db: Database.Database,
+export async function admitNewEvents(
+  db: QuorumDb,
   events: readonly TrustEvent[],
   repoId: number | null = null,
-): TrustEvent[] {
+): Promise<TrustEvent[]> {
   const admitted: TrustEvent[] = [];
   for (const event of events) {
-    if (hasSeen(db, event)) continue;
-    recordSeen(db, event, repoId);
+    if (await hasSeen(db, event)) continue;
+    await recordSeen(db, event, repoId);
     admitted.push(event);
   }
   return admitted;

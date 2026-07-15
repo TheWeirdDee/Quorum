@@ -1,11 +1,10 @@
 import type { AgentClient, EventStream } from "@croo-network/sdk";
-import type Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { OrderEventCorrelator } from "../../src/croo/orderCorrelator.js";
 import type { QuorumDecision } from "../../src/decision/schema.js";
 import type { TrustEvent } from "../../src/detector/types.js";
 import { persistDecisionAndOrders, processEvent } from "../../src/orchestrate/processEvent.js";
-import { openDb } from "../../src/store/db.js";
+import { closeDb, openDb, type QuorumDb } from "../../src/store/db.js";
 import { upsertRepo } from "../../src/store/repos.js";
 
 function fakeStream() {
@@ -24,18 +23,18 @@ const SIMULATED_HEALTHY_RAW = {
 const SIMULATED_HIGH_RISK_REPORT = "VERIS TRUST REPORT\nLEGITIMACY:   22/100\nRECOMMENDATION: CRITICAL RISK";
 
 describe("processEvent", () => {
-  let db: Database.Database;
+  let db: QuorumDb;
   let correlator: OrderEventCorrelator;
 
-  beforeEach(() => {
-    db = openDb(":memory:");
+  beforeEach(async () => {
+    db = await openDb(":memory:");
     correlator = new OrderEventCorrelator(fakeStream());
   });
 
-  afterEach(() => db.close());
+  afterEach(async () => closeDb(db));
 
   it("archives a low-severity event at $0 without needing any GitHub repo resolution", async () => {
-    const repo = upsertRepo(db, { githubUrl: "https://github.com/acme/monitored", riskPolicy: "balanced" });
+    const repo = await upsertRepo(db, { githubUrl: "https://github.com/acme/monitored", riskPolicy: "balanced" });
     const event: TrustEvent = {
       dependency: "left-pad@1.3.1",
       type: "deprecation",
@@ -55,14 +54,14 @@ describe("processEvent", () => {
       expect(result.decision.gate.investigated).toBe(false);
     }
 
-    const row = db.prepare("SELECT COUNT(*) as n FROM decisions").get() as { n: number };
-    expect(row.n).toBe(1);
+    const row = await db("decisions").count<{ n: string | number }>("id as n").first();
+    expect(Number(row?.n)).toBe(1);
   });
 
   it(
     "returns a degraded failure (never fabricates a decision) when the dependency has no resolvable GitHub repo",
     async () => {
-      const repo = upsertRepo(db, { githubUrl: "https://github.com/acme/monitored2", riskPolicy: "enterprise" });
+      const repo = await upsertRepo(db, { githubUrl: "https://github.com/acme/monitored2", riskPolicy: "enterprise" });
       const event: TrustEvent = {
         dependency: "evil-dep@2.4.1",
         type: "malicious_release",
@@ -78,8 +77,8 @@ describe("processEvent", () => {
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.reason).toContain("no resolvable GitHub repository");
 
-      const row = db.prepare("SELECT COUNT(*) as n FROM decisions").get() as { n: number };
-      expect(row.n).toBe(0);
+      const row = await db("decisions").count<{ n: string | number }>("id as n").first();
+      expect(Number(row?.n)).toBe(0);
     },
     15000,
   );
@@ -87,7 +86,7 @@ describe("processEvent", () => {
   it(
     "runs the full investigated pipeline (simulate) and persists the decision plus outbound orders",
     async () => {
-      const repo = upsertRepo(db, { githubUrl: "https://github.com/acme/monitored3", riskPolicy: "enterprise" });
+      const repo = await upsertRepo(db, { githubUrl: "https://github.com/acme/monitored3", riskPolicy: "enterprise" });
       const event: TrustEvent = {
         dependency: "left-pad@1.3.1",
         type: "malicious_release",
@@ -115,16 +114,16 @@ describe("processEvent", () => {
         expect(result.decision.lenses.trust?.verdict).toBe("high_risk");
       }
 
-      const decisionRow = db.prepare("SELECT COUNT(*) as n FROM decisions").get() as { n: number };
-      expect(decisionRow.n).toBe(1);
-      const orderRow = db.prepare("SELECT COUNT(*) as n FROM orders WHERE direction = 'outbound'").get() as { n: number };
-      expect(orderRow.n).toBeGreaterThanOrEqual(2);
+      const decisionRow = await db("decisions").count<{ n: string | number }>("id as n").first();
+      expect(Number(decisionRow?.n)).toBe(1);
+      const orderRow = await db("orders").where({ direction: "outbound" }).count<{ n: string | number }>("id as n").first();
+      expect(Number(orderRow?.n)).toBeGreaterThanOrEqual(2);
     },
     15000,
   );
 
   it("does not notify Slack when the repo registered with notify_type = 'none'", async () => {
-    const repo = upsertRepo(db, {
+    const repo = await upsertRepo(db, {
       githubUrl: "https://github.com/acme/quiet",
       riskPolicy: "balanced",
       notifyType: "none",
@@ -147,8 +146,8 @@ describe("processEvent", () => {
 });
 
 describe("persistDecisionAndOrders", () => {
-  it("persists a synthetic (event-less) baseline decision without a seen_events link", () => {
-    const db = openDb(":memory:");
+  it("persists a synthetic (event-less) baseline decision without a seen_events link", async () => {
+    const db = await openDb(":memory:");
     try {
       const decision: QuorumDecision = {
         schema: "quorum.decision.v1",
@@ -171,13 +170,14 @@ describe("persistDecisionAndOrders", () => {
         decided_at: new Date().toISOString(),
       };
 
-      persistDecisionAndOrders(db, undefined, decision);
+      await persistDecisionAndOrders(db, undefined, decision);
 
-      const row = db.prepare("SELECT event_id, decision FROM decisions").get() as { event_id: number | null; decision: string };
-      expect(row.event_id).toBeNull();
-      expect(row.decision).toBe("ARCHIVED_NO_ACTION");
+      const row = await db<{ event_id: number | null; decision: string }>("decisions").select("event_id", "decision").first();
+      expect(row).toBeDefined();
+      expect(row?.event_id).toBeNull();
+      expect(row?.decision).toBe("ARCHIVED_NO_ACTION");
     } finally {
-      db.close();
+      await closeDb(db);
     }
   });
 });

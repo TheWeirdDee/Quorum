@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { QuorumDb } from "./db.js";
 
 export interface RepoRecord {
   id: number;
@@ -19,38 +19,36 @@ export interface RegisterRepoInput {
 }
 
 /** Registers a repo, or returns the existing record if already registered. */
-export function upsertRepo(db: Database.Database, input: RegisterRepoInput): RepoRecord {
-  const existing = getRepoByUrl(db, input.githubUrl);
+export async function upsertRepo(db: QuorumDb, input: RegisterRepoInput): Promise<RepoRecord> {
+  const existing = await getRepoByUrl(db, input.githubUrl);
   if (existing) return existing;
 
-  const result = db
-    .prepare(
-      `INSERT INTO repos (github_url, risk_policy, budget_cap_usdc, notify_type, notify_webhook, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      input.githubUrl,
-      input.riskPolicy,
-      input.budgetCapUsdc ?? null,
-      input.notifyType ?? null,
-      input.notifyWebhook ?? null,
-      new Date().toISOString(),
-    );
+  await db("repos")
+    .insert({
+      github_url: input.githubUrl,
+      risk_policy: input.riskPolicy,
+      budget_cap_usdc: input.budgetCapUsdc ?? null,
+      notify_type: input.notifyType ?? null,
+      notify_webhook: input.notifyWebhook ?? null,
+      created_at: new Date().toISOString(),
+    })
+    .onConflict("github_url")
+    .ignore();
 
-  const created = getRepoById(db, Number(result.lastInsertRowid));
+  const created = await getRepoByUrl(db, input.githubUrl);
   if (!created) throw new Error(`Failed to read back repo ${input.githubUrl} after insert`);
   return created;
 }
 
-export function getRepoByUrl(db: Database.Database, githubUrl: string): RepoRecord | undefined {
-  return db.prepare(`SELECT * FROM repos WHERE github_url = ?`).get(githubUrl) as RepoRecord | undefined;
+export async function getRepoByUrl(db: QuorumDb, githubUrl: string): Promise<RepoRecord | undefined> {
+  return db<RepoRecord>("repos").where({ github_url: githubUrl }).first();
 }
 
-export function getRepoById(db: Database.Database, id: number): RepoRecord | undefined {
-  return db.prepare(`SELECT * FROM repos WHERE id = ?`).get(id) as RepoRecord | undefined;
+export async function getRepoById(db: QuorumDb, id: number): Promise<RepoRecord | undefined> {
+  return db<RepoRecord>("repos").where({ id }).first();
 }
 
 /** All registered repos, for the poll loop to iterate each cycle. */
-export function listRepos(db: Database.Database): RepoRecord[] {
-  return db.prepare(`SELECT * FROM repos ORDER BY id`).all() as RepoRecord[];
+export async function listRepos(db: QuorumDb): Promise<RepoRecord[]> {
+  return db<RepoRecord>("repos").orderBy("id");
 }

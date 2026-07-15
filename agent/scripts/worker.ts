@@ -20,7 +20,7 @@ import { OrderEventCorrelator } from "../src/croo/orderCorrelator.js";
 import { startProviderLoop, sweepProviderBacklog } from "../src/provider/providerLoop.js";
 import { runBaselineScan } from "../src/provider/registerRepo.js";
 import { RequirementsCache } from "../src/provider/requirementsCache.js";
-import { openDb } from "../src/store/db.js";
+import { closeDb, openDb } from "../src/store/db.js";
 import { startPollLoop } from "../src/worker/pollLoop.js";
 
 async function main(): Promise<void> {
@@ -32,12 +32,13 @@ async function main(): Promise<void> {
     return;
   }
 
-  const db = openDb();
+  const db = await openDb();
   const client = createCrooClient();
 
   const authed = await confirmAuth(client);
   logger.info(`worker: auth check (listOrders) ${authed ? "OK" : "FAILED"}`);
   if (!authed) {
+    await closeDb(db);
     process.exitCode = 1;
     return;
   }
@@ -46,8 +47,18 @@ async function main(): Promise<void> {
   const correlator = new OrderEventCorrelator(stream);
   const requirementsCache = new RequirementsCache(db, client);
 
-  const runBaseline = (request: Parameters<typeof runBaselineScan>[0]["request"]) =>
-    runBaselineScan({ db, client, correlator, request, simulate: env.CROO_SIMULATE });
+  const runBaseline = (
+    request: Parameters<typeof runBaselineScan>[0]["request"],
+    context?: { deadlineMs?: number | undefined },
+  ) =>
+    runBaselineScan({
+      db,
+      client,
+      correlator,
+      request,
+      simulate: env.CROO_SIMULATE,
+      deadlineMs: context?.deadlineMs,
+    });
 
   startProviderLoop({ client, stream, requirementsCache, runBaseline });
   logger.info("worker: provider loop live — listening for order_negotiation_created / order_paid");
@@ -76,17 +87,20 @@ async function main(): Promise<void> {
     logger.info("worker: DASHBOARD_API_KEY not set — read API disabled (fine for local dev / co-located deploys)");
   }
 
-  const shutdown = () => {
+  let shuttingDown = false;
+  const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     logger.info("worker: shutting down");
     clearInterval(sweepTimer);
     stopPolling();
     readApi?.close();
     stream.close();
-    db.close();
+    await closeDb(db);
     process.exit(0);
   };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", () => void shutdown());
+  process.on("SIGTERM", () => void shutdown());
 }
 
 main().catch((err) => {

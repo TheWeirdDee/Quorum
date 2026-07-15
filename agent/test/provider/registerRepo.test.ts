@@ -1,11 +1,10 @@
 import type { AgentClient, EventStream } from "@croo-network/sdk";
-import type Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OrderEventCorrelator } from "../../src/croo/orderCorrelator.js";
-import { runBaselineScan } from "../../src/provider/registerRepo.js";
+import { baselineHireTimeouts, runBaselineScan } from "../../src/provider/registerRepo.js";
 import type { QuorumRequest } from "../../src/provider/requestSchema.js";
 import { listDependenciesForRepo } from "../../src/store/dependencies.js";
-import { openDb } from "../../src/store/db.js";
+import { closeDb, openDb, type QuorumDb } from "../../src/store/db.js";
 import { getRepoByUrl } from "../../src/store/repos.js";
 
 function fakeStream() {
@@ -47,16 +46,16 @@ function stubQuietNetwork() {
 }
 
 describe("runBaselineScan", () => {
-  let db: Database.Database;
+  let db: QuorumDb;
   let correlator: OrderEventCorrelator;
 
-  beforeEach(() => {
-    db = openDb(":memory:");
+  beforeEach(async () => {
+    db = await openDb(":memory:");
     correlator = new OrderEventCorrelator(fakeStream());
   });
 
-  afterEach(() => {
-    db.close();
+  afterEach(async () => {
+    await closeDb(db);
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -72,9 +71,9 @@ describe("runBaselineScan", () => {
     expect(result.decision.event.type).toBe("baseline_scan");
     expect(result.decision.event.source).toBe("system");
 
-    const stored = getRepoByUrl(db, "https://github.com/acme/monitored");
+    const stored = await getRepoByUrl(db, "https://github.com/acme/monitored");
     expect(stored?.risk_policy).toBe("balanced");
-    const deps = listDependenciesForRepo(db, result.repo.id);
+    const deps = await listDependenciesForRepo(db, result.repo.id);
     expect(deps.map((d) => d.name)).toEqual(["left-pad"]);
   });
 
@@ -140,5 +139,18 @@ describe("runBaselineScan", () => {
 
     expect(result.dependencyCount).toBe(0);
     expect(result.decision.decision).toBe("ARCHIVED_NO_ACTION");
+  });
+});
+
+describe("baselineHireTimeouts", () => {
+  it("refuses to start autonomous hires when less than 30 seconds remain", () => {
+    expect(baselineHireTimeouts(29_999, 0)).toBeUndefined();
+  });
+
+  it("bounds all four sequential wait stages inside the remaining SLA window", () => {
+    expect(baselineHireTimeouts(8 * 60_000, 0)).toEqual({
+      orderCreatedMs: 90_000,
+      orderCompletedMs: 120_000,
+    });
   });
 });

@@ -1,8 +1,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type Database from "better-sqlite3";
 import { logger } from "../config/logger.js";
+import type { QuorumDb } from "../store/db.js";
 import { admitNewEvents } from "../store/seenEvents.js";
 import {
   normalizeGithubRepoMeta,
@@ -65,7 +65,7 @@ export async function detectTrustEvents(dep: PollDependencyInput): Promise<Trust
  * unbounded so existing callers/tests are unaffected.
  */
 export async function pollRepoForNewEvents(
-  db: Database.Database,
+  db: QuorumDb,
   repoId: number,
   repoUrl: string,
   maxDeps: number = Infinity,
@@ -96,7 +96,7 @@ export async function pollRepoForNewEvents(
     }
   }
 
-  return admitNewEvents(db, allEvents, repoId);
+  return await admitNewEvents(db, allEvents, repoId);
 }
 
 const FIXTURES_EVENTS_DIR = path.resolve(

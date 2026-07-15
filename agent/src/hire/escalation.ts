@@ -122,6 +122,8 @@ export interface HireEscalationParams {
   simulatedRaw?: unknown;
   simulate?: boolean | undefined;
   timeouts?: { orderCreatedMs?: number; orderCompletedMs?: number } | undefined;
+  /** Optional remaining event budget; the configured escalation cap still wins when lower. */
+  maxCostUsdc?: number | undefined;
   /** Defaults to env.ESCALATION_AGENT_SERVICE_ID; overridable so callers (and tests) don't depend on .env at import time. */
   serviceId?: string | undefined;
 }
@@ -155,6 +157,6 @@ export async function hireEscalation(params: HireEscalationParams): Promise<Hire
     simulate: params.simulate,
     simulatedDelivery: params.simulatedRaw !== undefined ? buildSimulatedDelivery(params.simulatedRaw) : undefined,
     timeouts: params.timeouts,
-    maxCostUsdc: env.ESCALATION_MAX_COST_USDC,
+    maxCostUsdc: Math.min(env.ESCALATION_MAX_COST_USDC, params.maxCostUsdc ?? Number.POSITIVE_INFINITY),
   });
 }
